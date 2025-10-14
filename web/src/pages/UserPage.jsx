@@ -14,8 +14,9 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { Navigate, useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap} from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
+import "../App.css";
 
 // MAP VIEW: React Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -33,7 +34,8 @@ const restaurantIcon = new L.Icon({
   iconSize: [32, 32],
   iconAnchor: [16, 32], // half width, full height
   popupAnchor: [0, -32], // position popup above icon
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+  shadowUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
   shadowSize: [41, 41],
   shadowAnchor: [13, 41],
 });
@@ -55,7 +57,6 @@ function FitBoundsView({ markers }) {
 
   return null;
 }
-
 
 function ZoomToRadius({ setSearchRadius, setMapInstance }) {
   const map = useMap();
@@ -119,7 +120,6 @@ function MapSetTo({ position }) {
   return null;
 }
 
-
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
   const apiKey = "183a5a8cb47547249e4b3a3a44e9e24f";
@@ -161,7 +161,13 @@ function getDistanceInKm(lat1, lon1, lat2, lon2) {
 // RESTAURANT OPEN TIMES
 function isRestaurantOpenToday(hoursArray, now = new Date()) {
   const days = [
-    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
   ];
   const today = days[now.getDay()];
 
@@ -171,8 +177,10 @@ function isRestaurantOpenToday(hoursArray, now = new Date()) {
   const { Opening, Closing } = todayEntry[today];
 
   if (
-    !Opening || !Closing ||
-    Opening.length !== 4 || Closing.length !== 4 ||
+    !Opening ||
+    !Closing ||
+    Opening.length !== 4 ||
+    Closing.length !== 4 ||
     Opening === Closing // 🔒 Same open/close time → closed
   ) {
     return false;
@@ -225,6 +233,7 @@ export default function UserPage() {
   const [filteredRestaurants, setFilteredRestaurants] = useState([]);
   const [userOrders, setUserOrders] = useState([]);
   const [userMessages, setUserMessages] = useState([]);
+  const [activeTab, setActiveTab] = useState("home");
 
   const navigate = useNavigate();
 
@@ -237,7 +246,7 @@ export default function UserPage() {
     return () => unsub();
   }, []);
 
-    // Time updated every minute
+  // Time updated every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentDateTime(new Date());
@@ -309,7 +318,6 @@ export default function UserPage() {
 
         setAllRestaurants(fetched); //all restaurants on initial fetch appear on map
         // only those restaurants user toggles with +/- appear on list (filtered by distance)
-
       } catch (err) {
         console.error("Error fetching restaurants:", err);
       }
@@ -346,7 +354,12 @@ export default function UserPage() {
     let collectedOrders = [];
 
     for (const restaurant of allRestaurants) {
-      const ordersRef = collection(db, "restaurants", restaurant.id, "restaurantOrders");
+      const ordersRef = collection(
+        db,
+        "restaurants",
+        restaurant.id,
+        "restaurantOrders"
+      );
 
       const unsubscribe = onSnapshot(ordersRef, (snapshot) => {
         const restaurantOrders = [];
@@ -365,8 +378,13 @@ export default function UserPage() {
 
         // Update collected orders from all restaurants
         collectedOrders = [
-          ...collectedOrders.filter(o => o.fromRestaurant !== restaurant.storeName),
-          ...restaurantOrders.map(order => ({ ...order, fromRestaurant: restaurant.storeName })),
+          ...collectedOrders.filter(
+            (o) => o.fromRestaurant !== restaurant.storeName
+          ),
+          ...restaurantOrders.map((order) => ({
+            ...order,
+            fromRestaurant: restaurant.storeName,
+          })),
         ];
 
         // Set only once all restaurants have been processed at least once
@@ -387,25 +405,28 @@ export default function UserPage() {
     const messagesRef = collection(db, "users", userData.id, "messages");
 
     // Setup real-time listener for messages
-    const unsub = onSnapshot(messagesRef, (snapshot) => {
-      const fetchedMessages = snapshot.docs.map((docSnap) => ({
-        messageId: docSnap.id,
-        ...docSnap.data(),
-      }));
-      // Sort by createdAt time descending (newest first)
-      fetchedMessages.sort((a, b) => {
-        const timeA = a.createdAt?.toMillis?.() || 0;
-        const timeB = b.createdAt?.toMillis?.() || 0;
-        return timeB - timeA; // B minus A for descending (newest first)
-      });
-      setUserMessages(fetchedMessages);
-    }, (error) => {
-      console.error("Error listening to user messages:", error);
-    // Handle error fetching messages (optional)
-    });
+    const unsub = onSnapshot(
+      messagesRef,
+      (snapshot) => {
+        const fetchedMessages = snapshot.docs.map((docSnap) => ({
+          messageId: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Sort by createdAt time descending (newest first)
+        fetchedMessages.sort((a, b) => {
+          const timeA = a.createdAt?.toMillis?.() || 0;
+          const timeB = b.createdAt?.toMillis?.() || 0;
+          return timeB - timeA; // B minus A for descending (newest first)
+        });
+        setUserMessages(fetchedMessages);
+      },
+      (error) => {
+        console.error("Error listening to user messages:", error);
+        // Handle error fetching messages (optional)
+      }
+    );
     return () => unsub();
   }, [userData?.id]);
-
 
   // Handle phone and address update form submit
   const phoneRegex = /^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/;
@@ -453,15 +474,10 @@ export default function UserPage() {
     }
   };
 
-
   if (loading || fetchingUser) return <div>Loading...</div>;
 
   if (error)
-    return (
-      <div className="p-6 text-red-600 font-semibold">
-        Error: {error}
-      </div>
-    );
+    return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
 
   if (!user) return <Navigate to="/login" />;
 
@@ -478,324 +494,434 @@ export default function UserPage() {
   const filteredTypes = Object.keys(groupedFilteredByType).sort();
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">
-        Welcome, {user.displayName} (User)
-      </h1>
+    <div className="flex min-h-screen bg-gray-50">
+      <aside className="w-64 bg-white border-r border-gray-300 p-4 sticky top-0 h-screen overflow-y-auto">
+        <div className="flex flex-col space-y-2">
+          <button
+            onClick={() => setActiveTab("home")}
+            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+          >
+            Home
+          </button>
+          <button
+            onClick={() => setActiveTab("messages")}
+            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+          >
+            Messages
+          </button>
+          <button
+            onClick={() => setActiveTab("settings")}
+            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+          >
+            Settings
+          </button>
+          <button
+            onClick={() => setActiveTab("orders")}
+            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+          >
+            My Orders
+          </button>
+        </div>
+      </aside>
 
-      {userOrders.filter(order => order.orderConfirmed !== false).length === 0 ? (
-        <p className="text-gray-600 italic">No current orders found.</p>
-      ) : (
-        <div className="space-y-4">
-          {userOrders
-            .filter(order => order.orderConfirmed !== false)
-            .map((order, index) => (
-              <div
-                key={order.orderId || index}
-                className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm"
+      <main className="flex-1 p-6 overflow-y-auto">
+        <h1 className="text-2xl font-bold">
+          Welcome, {user.displayName} (User)
+        </h1>
+
+        {activeTab === "orders" && (
+          <>
+            {userOrders.filter((order) => order.orderConfirmed !== false)
+              .length === 0 ? (
+              <p className="text-gray-600 italic">No current orders found.</p>
+            ) : (
+              <div className="space-y-4">
+                {userOrders
+                  .filter((order) => order.orderConfirmed !== false)
+                  .map((order, index) => (
+                    <div
+                      key={order.orderId || index}
+                      className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm"
+                    >
+                      <h3 className="font-semibold text-lg mb-1">
+                        Order #{index + 1}
+                      </h3>
+                      <p>
+                        <strong>Status:</strong> {order.deliveryStatus}
+                      </p>
+                      <p>
+                        <strong>Restaurant:</strong> {order.restaurantAddress}
+                      </p>
+                      <p>
+                        <strong>Estimated Ready Time:</strong>{" "}
+                        {order.estimatedReadyTime?.toDate().toLocaleString()}
+                      </p>
+                      <div className="mt-2">
+                        <strong>Items:</strong>
+                        <ul className="list-disc list-inside ml-4">
+                          {order.items?.map((item, idx) => (
+                            <li key={idx}>
+                              {item.name} (x{item.quantity})
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === "settings" && (
+          <>
+            <hr className="my-8 border-t-2 border-gray-300" />
+            <form onSubmit={handleProfileSubmit}>
+              <table className="w-full table-fixed border border-gray-300 mt-4">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="text-left px-4 py-2 border-b w-1/6">
+                      Field
+                    </th>
+                    <th className="text-left px-4 py-2 border-b w-1/3">
+                      Value
+                    </th>
+                    <th className="text-left px-4 py-2 border-b w-1/6">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {/* Non-editable fields */}
+                  <tr>
+                    <td className="px-4 py-2 border-b align-top">Name</td>
+                    <td className="px-4 py-2 border-b" colSpan={2}>
+                      {userData?.name || user.displayName}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 border-b align-top">Email</td>
+                    <td className="px-4 py-2 border-b" colSpan={2}>
+                      {userData?.email || user.email}
+                    </td>
+                  </tr>
+
+                  {/* Editable Phone input */}
+                  <tr>
+                    <td className="px-4 py-2 border-b align-top">Phone</td>
+                    <td className="px-4 py-2 border-b">
+                      <input
+                        type="tel"
+                        className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
+                        value={phoneInput}
+                        onChange={(e) => setPhoneInput(e.target.value)}
+                        placeholder="555-123-4567"
+                      />
+                    </td>
+                  </tr>
+
+                  {/* Editable Address input */}
+                  <tr>
+                    <td className="px-4 py-2 border-b align-top">Address</td>
+                    <td className="px-4 py-2 border-b">
+                      <input
+                        type="text"
+                        className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
+                        value={addressInput}
+                        onChange={(e) => setAddressInput(e.target.value)}
+                        placeholder="123 Main St, City, Country"
+                      />
+                    </td>
+                    {/* The button spans two rows */}
+                    <td className="px-4 py-2 border-b align-top" rowSpan={1}>
+                      <button
+                        type="submit"
+                        className="bg-blue-600 text-white px-4 py-2 rounded text-sm w-full"
+                        disabled={savingProfile}
+                      >
+                        {savingProfile ? "Saving..." : "Update"}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </form>
+          </>
+        )}
+
+        {activeTab === "home" && (
+          <>
+            <div className="h-[500px] w-full rounded overflow-hidden border border-gray-300 mt-4">
+              <MapContainer
+                center={userLatLng}
+                zoom={parseInt(sessionStorage.getItem("userMapZoom")) || 11} //Restore session level or fallback to 11
+                scrollWheelZoom={false}
+                style={{ height: "300px", width: "300px" }}
               >
-                <h3 className="font-semibold text-lg mb-1">
-                  Order #{index + 1}
-                </h3>
-                <p><strong>Status:</strong> {order.deliveryStatus}</p>
-                <p><strong>Restaurant:</strong> {order.restaurantAddress}</p>
-                <p>
-                  <strong>Estimated Ready Time:</strong>{" "}
-                  {order.estimatedReadyTime?.toDate().toLocaleString()}
-                </p>
-                <div className="mt-2">
-                  <strong>Items:</strong>
-                  <ul className="list-disc list-inside ml-4">
-                    {order.items?.map((item, idx) => (
-                      <li key={idx}>
-                        {item.name} (x{item.quantity})
-                      </li>
-                    ))}
+                <MapSetTo position={userLatLng} />
+                <ZoomToRadius
+                  setSearchRadius={setSearchRadius}
+                  setMapInstance={setMapInstance}
+                />
+                {shouldFitBounds && (
+                  <FitBoundsView
+                    markers={[
+                      userLatLng,
+                      ...restaurantsWithinRange.map((r) => [
+                        r.location.latitude,
+                        r.location.longitude,
+                      ]),
+                    ]}
+                  />
+                )}
+                <TileLayer
+                  attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <Marker position={userLatLng}>
+                  <Popup>Your delivery location</Popup>
+                </Marker>
+
+                {allRestaurants
+                  .map((r) => {
+                    const rLat = r.location?.latitude;
+                    const rLng = r.location?.longitude;
+                    if (!rLat || !rLng) return null;
+
+                    const distance = getDistanceInKm(
+                      userLatLng[0],
+                      userLatLng[1],
+                      rLat,
+                      rLng
+                    );
+
+                    return { ...r, distance: parseFloat(distance) };
+                  })
+                  .filter((r) => r && r.distance <= 100)
+                  .map((r) => (
+                    <Marker
+                      key={r.id}
+                      position={[r.location.latitude, r.location.longitude]}
+                      icon={restaurantIcon}
+                    >
+                      <Popup>
+                        {r.storeName}
+                        <br />
+                        {r.address}
+                        <br />
+                        {r.distance.toFixed(2)} km away
+                      </Popup>
+                    </Marker>
+                  ))}
+              </MapContainer>
+            </div>
+
+            <h2 className="mt-8 text-xl">
+              Nearby Restaurants within {searchRadius} km
+            </h2>
+            <div className="mt-4 space-y-6">
+              {filteredTypes.map((type) => (
+                <div key={type}>
+                  <h3 className="text-lg font-semibold mb-2">{type}</h3>
+                  <ul className="space-y-2">
+                    {groupedFilteredByType[type].map((r) => {
+                      const rLat = r.location?.latitude;
+                      const rLng = r.location?.longitude;
+                      const distance =
+                        rLat && rLng
+                          ? getDistanceInKm(
+                              userLatLng[0],
+                              userLatLng[1],
+                              rLat,
+                              rLng
+                            )
+                          : null;
+                      const isExpanded = expandedRestaurantId === r.id;
+
+                      return (
+                        <li
+                          key={r.id}
+                          className="border p-2 rounded shadow cursor-pointer"
+                          onClick={() => {
+                            const encodedName = encodeURIComponent(r.storeName);
+                            const encodedId = encodeURIComponent(
+                              r.restaurantId
+                            );
+                            navigate(
+                              `/user/${encodedName}/${encodedId}/order`,
+                              { state: { restaurant: r } }
+                            );
+                          }}
+                        >
+                          <h4 className="font-semibold">
+                            {r.storeName} — Rating: {r.rating}
+                            {distance ? (
+                              <span className="text-sm text-gray-600">
+                                {" "}
+                                — {distance} km away
+                              </span>
+                            ) : (
+                              <span className="text-sm text-red-600">
+                                {" "}
+                                — Location missing
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-sm text-gray-700">{r.address}</p>
+                          <p className="font-semibold">
+                            {r.hours && (
+                              <>
+                                <span
+                                  className={`ml-2 text-sm font-medium ${
+                                    isRestaurantOpenToday(
+                                      r.hours,
+                                      currentDateTime
+                                    )
+                                      ? "text-green-600"
+                                      : "text-red-600"
+                                  }`}
+                                >
+                                  {isRestaurantOpenToday(
+                                    r.hours,
+                                    currentDateTime
+                                  )
+                                    ? "Open "
+                                    : "Closed "}
+                                </span>
+
+                                {/* Show today’s hours inline */}
+                                <span className="ml-2 text-sm text-gray-500">
+                                  (
+                                  {(() => {
+                                    const dayName =
+                                      new Date().toLocaleDateString("en-US", {
+                                        weekday: "long",
+                                      });
+                                    const todayHours = r.hours.find(
+                                      (entry) => entry[dayName]
+                                    );
+                                    if (!todayHours) return "No hours set";
+
+                                    const opening = todayHours[dayName].Opening;
+                                    const closing = todayHours[dayName].Closing;
+                                    return `${formatTime(
+                                      opening
+                                    )} - ${formatTime(closing)}`;
+                                  })()}
+                                  )
+                                </span>
+                              </>
+                            )}
+                          </p>
+
+                          {/* Only show available menu items */}
+                          {isExpanded &&
+                            r.menu &&
+                            r.menu.filter((item) => item.available).length >
+                              0 && (
+                              <ul className="mt-4 space-y-4">
+                                {r.menu
+                                  .filter((item) => item.available)
+                                  .map((item, index) => (
+                                    <li
+                                      key={index}
+                                      className="border rounded p-3 shadow-sm flex flex-col sm:flex-row sm:items-start gap-4"
+                                    >
+                                      <div className="flex items-start space-x-4">
+                                        {item.imgUrl && (
+                                          <img
+                                            src={item.imgUrl}
+                                            alt={item.name}
+                                            style={{
+                                              width: "100px",
+                                              height: "100px",
+                                              objectFit: "cover",
+                                            }}
+                                            className="rounded shrink-0"
+                                          />
+                                        )}
+                                        <div>
+                                          <h5 className="font-semibold">
+                                            {item.name}
+                                          </h5>
+                                          <p className="text-sm text-gray-600">
+                                            {item.description}
+                                          </p>
+                                          <p className="text-sm text-gray-500">
+                                            Calories: {item.calories}
+                                          </p>
+                                          <p className="text-sm font-medium">
+                                            ${item.price?.toFixed(2)}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
+
+                          {isExpanded &&
+                            (!r.menu ||
+                              r.menu.filter((item) => item.available).length ===
+                                0) && (
+                              <p className="mt-2 text-sm italic text-gray-500">
+                                No menu available.
+                              </p>
+                            )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
-              </div>
-            ))}
-        </div>
-      )}
+              ))}
+            </div>
+          </>
+        )}
 
-      
-      <hr className="my-8 border-t-2 border-gray-300" />
-      <form onSubmit={handleProfileSubmit}>
-        <table className="w-full table-fixed border border-gray-300 mt-4">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="text-left px-4 py-2 border-b w-1/6">Field</th>
-              <th className="text-left px-4 py-2 border-b w-1/3">Value</th>
-              <th className="text-left px-4 py-2 border-b w-1/6">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {/* Non-editable fields */}
-            <tr>
-              <td className="px-4 py-2 border-b align-top">Name</td>
-              <td className="px-4 py-2 border-b" colSpan={2}>
-                {userData?.name || user.displayName}
-              </td>
-            </tr>
-            <tr>
-              <td className="px-4 py-2 border-b align-top">Email</td>
-              <td className="px-4 py-2 border-b" colSpan={2}>
-                {userData?.email || user.email}
-              </td>
-            </tr>
-
-            {/* Editable Phone input */}
-            <tr>
-              <td className="px-4 py-2 border-b align-top">Phone</td>
-              <td className="px-4 py-2 border-b">
-                <input
-                  type="tel"
-                  className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
-                  value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value)}
-                  placeholder="555-123-4567"
-                />
-              </td>
-            </tr>
-
-            {/* Editable Address input */}
-            <tr>
-              <td className="px-4 py-2 border-b align-top">Address</td>
-              <td className="px-4 py-2 border-b">
-                <input
-                  type="text"
-                  className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
-                  value={addressInput}
-                  onChange={(e) => setAddressInput(e.target.value)}
-                  placeholder="123 Main St, City, Country"
-                />
-              </td>
-              {/* The button spans two rows */}
-              <td className="px-4 py-2 border-b align-top" rowSpan={1}>
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-4 py-2 rounded text-sm w-full"
-                  disabled={savingProfile}
-                >
-                  {savingProfile ? "Saving..." : "Update"}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </form>
-
-      <div className="h-[500px] w-full rounded overflow-hidden border border-gray-300 mt-4">
-        <MapContainer
-          center={userLatLng}
-          zoom={parseInt(sessionStorage.getItem("userMapZoom")) || 11} //Restore session level or fallback to 11
-          scrollWheelZoom={false}
-          style={{ height: "300px", width: "300px" }}
-        >
-          <MapSetTo position={userLatLng} />
-          <ZoomToRadius
-            setSearchRadius={setSearchRadius}
-            setMapInstance={setMapInstance}
-          />
-          {shouldFitBounds && (
-            <FitBoundsView
-              markers={[
-                userLatLng,
-                ...restaurantsWithinRange.map((r) => [
-                  r.location.latitude,
-                  r.location.longitude,
-                ]),
-              ]}
-            />
-          )}
-          <TileLayer
-            attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <Marker position={userLatLng}>
-            <Popup>Your delivery location</Popup>
-          </Marker>
-
-          {allRestaurants
-          .map((r) => {
-            const rLat = r.location?.latitude;
-            const rLng = r.location?.longitude;
-            if (!rLat || !rLng) return null;
-
-            const distance = getDistanceInKm(
-              userLatLng[0],
-              userLatLng[1],
-              rLat,
-              rLng
-            );
-
-            return { ...r, distance: parseFloat(distance) };
-          })
-          .filter((r) => r && r.distance <= 100)
-          .map((r) => (
-            <Marker
-              key={r.id}
-              position={[r.location.latitude, r.location.longitude]}
-              icon={restaurantIcon}
-            >
-            <Popup>
-              {r.storeName}
-              <br />
-              {r.address}
-              <br />
-              {r.distance.toFixed(2)} km away
-            </Popup>
-            </Marker>
-          ))}
-
-        </MapContainer>
-      </div>
-    
-      <h2 className="mt-8 text-xl">Nearby Restaurants within {searchRadius} km</h2>
-      <div className="mt-4 space-y-6">
-        {filteredTypes.map((type) => (
-        <div key={type}>
-          <h3 className="text-lg font-semibold mb-2">{type}</h3>
-          <ul className="space-y-2">
-            {groupedFilteredByType[type].map((r) => {
-              const rLat = r.location?.latitude;
-              const rLng = r.location?.longitude;
-              const distance = (rLat && rLng)
-                ? getDistanceInKm(userLatLng[0], userLatLng[1], rLat, rLng)
-                : null;
-              const isExpanded = expandedRestaurantId === r.id;
-
-              return (
-                <li
-                  key={r.id}
-                  className="border p-2 rounded shadow cursor-pointer"
-                  onClick={() => {
-                    const encodedName = encodeURIComponent(r.storeName);
-                    const encodedId = encodeURIComponent(r.restaurantId);
-                    navigate(`/user/${encodedName}/${encodedId}/order`, { state: { restaurant: r } });
-                  }}
-                >
-                    <h4 className="font-semibold">
-                      {r.storeName} — Rating: {r.rating}
-                      {distance ? (
-                        <span className="text-sm text-gray-600">
-                          {" "}— {distance} km away
-                        </span>
-                      ) : (
-                        <span className="text-sm text-red-600">
-                          {" "}— Location missing
-                        </span>
-                      )}
-                    </h4>
-                    <p className="text-sm text-gray-700">{r.address}</p>
-                    <p className="font-semibold">
-                      {r.hours && (
-                        <>
-                          <span
-                            className={`ml-2 text-sm font-medium ${
-                              isRestaurantOpenToday(r.hours, currentDateTime)
-                                ? "text-green-600"
-                                : "text-red-600"
-                            }`}
-                          >
-                            {isRestaurantOpenToday(r.hours, currentDateTime) ? "Open " : "Closed "}
-                          </span>
-
-                          {/* Show today’s hours inline */}
-                          <span className="ml-2 text-sm text-gray-500">
-                            (
-                            {(() => {
-                              const dayName = new Date().toLocaleDateString("en-US", {
-                                weekday: "long",
-                              });
-                              const todayHours = r.hours.find((entry) => entry[dayName]);
-                              if (!todayHours) return "No hours set";
-
-                              const opening = todayHours[dayName].Opening;
-                              const closing = todayHours[dayName].Closing;
-                              return `${formatTime(opening)} - ${formatTime(closing)}`;
-                            })()}
-                            )
-                          </span>
-                        </>
-                      )}
-                    </p>
-
-                    {/* Only show available menu items */}
-                    {isExpanded && r.menu && r.menu.filter(item => item.available).length > 0 && (
-                      <ul className="mt-4 space-y-4">
-                        {r.menu.filter(item => item.available).map((item, index) => (
-                          <li
-                            key={index}
-                            className="border rounded p-3 shadow-sm flex flex-col sm:flex-row sm:items-start gap-4"
-                          >
-                            <div className="flex items-start space-x-4">
-                              {item.imgUrl && (
-                                <img
-                                  src={item.imgUrl}
-                                  alt={item.name}
-                                  style={{ width: "100px", height: "100px", objectFit: "cover" }}
-                                  className="rounded shrink-0"
-                                />
-                              )}
-                              <div>
-                                <h5 className="font-semibold">{item.name}</h5>
-                                <p className="text-sm text-gray-600">{item.description}</p>
-                                <p className="text-sm text-gray-500">Calories: {item.calories}</p>
-                                <p className="text-sm font-medium">${item.price?.toFixed(2)}</p>
-                              </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+        {activeTab === "messages" && (
+          <>
+            <hr className="my-8 border-t-2 border-gray-300" />
+            <h2 className="text-xl font-bold mt-8 mb-4">Messages</h2>
+            {!userMessages || userMessages.length === 0 ? (
+              <p className="text-gray-600 italic">No new messages.</p>
+            ) : (
+              <ul className="space-y-4 list-none p-0">
+                {userMessages.map((msg) => (
+                  <li
+                    key={msg.messageId}
+                    className={`border rounded p-4 shadow-sm ${
+                      msg.read === false
+                        ? "bg-blue-50 border-blue-300"
+                        : "bg-white border-gray-200"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="font-semibold text-lg">{msg.message}</p>
+                      <span className="text-xs text-gray-500 ml-4 whitespace-nowrap">
+                        {msg.createdAt?.toDate().toLocaleString()}
+                      </span>
+                    </div>
+                    {msg.read === false && (
+                      <span className="inline-block text-xs font-medium text-blue-600">
+                        NEW
+                      </span>
                     )}
-
-                    {isExpanded && (!r.menu || r.menu.filter(item => item.available).length === 0) && (
-                      <p className="mt-2 text-sm italic text-gray-500">No menu available.</p>
+                    {msg.orderId && (
+                      <p className="text-sm text-gray-600 mt-1">
+                        Related to Order ID: {msg.orderId}
+                      </p>
                     )}
                   </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-      <hr className="my-8 border-t-2 border-gray-300" />
-      <h2 className="text-xl font-bold mt-8 mb-4">Messages</h2>
-      {(!userMessages || userMessages.length === 0) ? (
-        <p className="text-gray-600 italic">No new messages.</p>
-      ) : (
-        <ul className="space-y-4 list-none p-0">
-          {userMessages.map((msg) => (
-            <li
-              key={msg.messageId}
-              className={`border rounded p-4 shadow-sm ${
-                msg.read === false ? "bg-blue-50 border-blue-300" : "bg-white border-gray-200"
-              }`}
-            >
-              <div className="flex justify-between items-start mb-1">
-                <p className="font-semibold text-lg">{msg.message}</p>
-                <span className="text-xs text-gray-500 ml-4 whitespace-nowrap">
-                  {msg.createdAt?.toDate().toLocaleString()}
-                </span>
-              </div>
-              {msg.read === false && (
-                <span className="inline-block text-xs font-medium text-blue-600">NEW</span>
-              )}
-              {msg.orderId && (
-                <p className="text-sm text-gray-600 mt-1">Related to Order ID: {msg.orderId}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </main>
     </div>
   );
 }
-
 
 /*
 * Later: Better UI -> top right nav is UserPage user profile link (Name, email, phone* Please complete your user profile before ordering message; delete account)
