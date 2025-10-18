@@ -18,6 +18,12 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "../App.css";
 
+import homeIcon from "../assets/home.svg";
+import messagesIcon from "../assets/messages.svg";
+import settingsIcon from "../assets/settings.svg";
+import ordersIcon from "../assets/orders.svg";
+import defaultProfileImg from "../assets/defaultProfile.svg";
+
 // MAP VIEW: React Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -237,6 +243,41 @@ export default function UserPage() {
   const [userMessages, setUserMessages] = useState([]);
   const [activeTab, setActiveTab] = useState("home");
 
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filters, setFilters] = useState({
+    openNow: false,
+    minRating: null,
+    types: [],
+    sort: "distance",
+  });
+
+  const toggleType = (type) => {
+    setFilters((f) => {
+      const exists = f.types.includes(type);
+      return {
+        ...f,
+        types: exists ? f.types.filter((t) => t !== type) : [...f.types, type],
+      };
+    });
+  };
+  const clearTypes = () => setFilters((f) => ({ ...f, types: [] }));
+
+  // Info for cuisine filter buttons
+  const cuisineBtns = [
+    { type: "Pizza", label: "Pizza", icon: "🍕" },
+    { type: "Fast Food", label: "Fast Food", icon: "🍔" },
+    { type: "Sushi", label: "Sushi", icon: "🍣" },
+    { type: "Indian", label: "Indian", icon: "🥘" },
+    { type: "Fine Dining", label: "Fine Dining", icon: "🍷" },
+    { type: "Middle Eastern", label: "Middle Eastern", icon: "🍢" },
+    { type: "Mexican", label: "Mexican", icon: "🌮" },
+    { type: "Chinese", label: "Chinese", icon: "🥡" },
+    { type: "Italian", label: "Italian", icon: "🍝" },
+    { type: "Greek", label: "Greek", icon: "🥙" },
+    { type: "BBQ", label: "BBQ", icon: "🍖" },
+    { type: "Vegan", label: "Vegan", icon: "🥗" },
+  ];
+
   const navigate = useNavigate();
 
   // Auth listener
@@ -330,25 +371,62 @@ export default function UserPage() {
 
   // Inside useEffect or after fetching restaurants:
   useEffect(() => {
-    const filtered = allRestaurants
+    let filtered = allRestaurants
       .map((r) => {
         const rLat = r.location?.latitude;
         const rLng = r.location?.longitude;
         if (!rLat || !rLng) return null;
-
         const distance = getDistanceInKm(
           userLatLng[0],
           userLatLng[1],
           rLat,
           rLng
         );
-
         return { ...r, distance: parseFloat(distance) };
       })
       .filter((r) => r && r.distance <= searchRadius);
 
-    setFilteredRestaurants(filtered);
-  }, [searchRadius, userLatLng, allRestaurants]);
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          r.storeName?.toLowerCase().includes(term) ||
+          r.address?.toLowerCase().includes(term)
+      );
+    }
+
+    if (filters.openNow) {
+      filtered = filtered.filter((r) =>
+        isRestaurantOpenToday(r.hours, currentDateTime)
+      );
+    }
+
+    if (filters.types?.length) {
+      filtered = filtered.filter((r) => filters.types.includes(r.type));
+    }
+
+    const sorted = [...filtered];
+    if (filters.sort === "distance") {
+      sorted.sort((a, b) => a.distance - b.distance);
+    } else if (filters.sort === "rating") {
+      sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    } else if (filters.sort === "name") {
+      sorted.sort((a, b) =>
+        (a.storeName ?? "").localeCompare(b.storeName ?? "")
+      );
+    }
+
+    setFilteredRestaurants(sorted);
+  }, [
+    allRestaurants,
+    userLatLng,
+    searchRadius,
+    searchTerm,
+    filters.openNow,
+    filters.sort,
+    currentDateTime,
+    filters.types,
+  ]);
 
   //ORDERS FOR USER
   useEffect(() => {
@@ -499,51 +577,112 @@ export default function UserPage() {
   const restaurantsWithinRange = filteredRestaurants;
   const shouldFitBounds = restaurantsWithinRange.length > 0;
 
-  const groupedFilteredByType = filteredRestaurants.reduce((acc, r) => {
-    const type = r.type || "Other";
-    if (!acc[type]) acc[type] = [];
-    acc[type].push(r);
-    return acc;
-  }, {});
-
-  const filteredTypes = Object.keys(groupedFilteredByType).sort();
-
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <aside className="w-64 bg-white border-r border-gray-300 p-4 sticky top-0 h-screen overflow-y-auto">
+      <aside className="w-64 bg-white border-r border-gray-300 p-4 sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-hidden">
         <div className="flex flex-col space-y-2">
           <button
             onClick={() => setActiveTab("home")}
-            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
+    ${
+      activeTab === "home"
+        ? "bg-gray-200 text-gray-800"
+        : "hover:bg-gray-100 text-gray-800"
+    }
+  `}
           >
+            <img src={homeIcon} className="w-5 h-5 object-contain" alt="Home" />
             Home
           </button>
+
           <button
             onClick={() => setActiveTab("messages")}
-            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
+    ${
+      activeTab === "messages"
+        ? "bg-gray-200 text-gray-800"
+        : "hover:bg-gray-100 text-gray-800"
+    }
+  `}
           >
+            <img
+              src={messagesIcon}
+              className="w-5 h-5 object-contain"
+              alt="Messages"
+            />
             Messages
           </button>
+
           <button
             onClick={() => setActiveTab("settings")}
-            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
+    ${
+      activeTab === "settings"
+        ? "bg-gray-200 text-gray-800"
+        : "hover:bg-gray-100 text-gray-800"
+    }
+  `}
           >
+            <img
+              src={settingsIcon}
+              className="w-5 h-5 object-contain"
+              alt="Settings"
+            />
             Settings
           </button>
+
           <button
             onClick={() => setActiveTab("orders")}
-            className="text-left px-3 py-2 rounded-md hover:bg-gray-100 cursor-pointer"
+            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
+    ${
+      activeTab === "orders"
+        ? "bg-gray-200 text-gray-800"
+        : "hover:bg-gray-100 text-gray-800"
+    }
+  `}
           >
+            <img
+              src={ordersIcon}
+              className="w-5 h-5 object-contain"
+              alt="My Orders"
+            />
             My Orders
           </button>
+
+          <hr className="my-1 border-gray-300" />
+          <div className="mt-3">
+            <div className="flex flex-col items-center space-y-3">
+              {cuisineBtns.map(({ type, label, icon }) => {
+                const active = filters.types.includes(type);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => {
+                      toggleType(type);
+                      setActiveTab("home");
+                    }}
+                    className={`flex items-center justify-start w-[200px] px-2 py-0 rounded-lg border font-medium text-base transition-all cursor-pointer
+          ${
+            active
+              ? "bg-blue-600 text-white border-blue-600 shadow-md"
+              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50 hover:shadow"
+          }`}
+                    aria-pressed={active}
+                  >
+                    <span className="inline-flex items-center justify-center w-8 h-8 mr-3 text-2xl">
+                      {icon}
+                    </span>
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </aside>
 
       <main className="flex-1 p-6 overflow-y-auto">
-        <h1 className="text-2xl font-bold">
-          Welcome, {userData?.name || user.displayName || user.email} (User)
-        </h1>
-
         {activeTab === "orders" && (
           <>
             {userOrders.filter((order) => order.orderConfirmed !== false)
@@ -602,6 +741,10 @@ export default function UserPage() {
 
         {activeTab === "settings" && (
           <>
+            <img
+              src={defaultProfileImg}
+              className="w-50 h-50 object-cover rounded-full m-auto"
+            ></img>
             <hr className="my-8 border-t-2 border-gray-300" />
             <form onSubmit={handleProfileSubmit}>
               <table className="w-full table-fixed border border-gray-300 mt-4">
@@ -703,230 +846,256 @@ export default function UserPage() {
 
         {activeTab === "home" && (
           <>
-            <div className="h-[500px] w-full rounded overflow-hidden border border-gray-300 mt-4">
-              <MapContainer
-                center={userLatLng}
-                zoom={parseInt(sessionStorage.getItem("userMapZoom")) || 11} //Restore session level or fallback to 11
-                scrollWheelZoom={false}
-                style={{ height: "300px", width: "300px" }}
-              >
-                <MapSetTo position={userLatLng} />
-                <ZoomToRadius
-                  setSearchRadius={setSearchRadius}
-                  setMapInstance={setMapInstance}
-                />
-                {shouldFitBounds && (
-                  <FitBoundsView
-                    markers={[
-                      userLatLng,
-                      ...restaurantsWithinRange.map((r) => [
-                        r.location.latitude,
-                        r.location.longitude,
-                      ]),
-                    ]}
-                  />
-                )}
-                <TileLayer
-                  attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <Marker position={userLatLng}>
-                  <Popup>Your delivery location</Popup>
-                </Marker>
-
-                {allRestaurants
-                  .map((r) => {
-                    const rLat = r.location?.latitude;
-                    const rLng = r.location?.longitude;
-                    if (!rLat || !rLng) return null;
-
-                    const distance = getDistanceInKm(
-                      userLatLng[0],
-                      userLatLng[1],
-                      rLat,
-                      rLng
-                    );
-
-                    return { ...r, distance: parseFloat(distance) };
-                  })
-                  .filter((r) => r && r.distance <= 100)
-                  .map((r) => (
-                    <Marker
-                      key={r.id}
-                      position={[r.location.latitude, r.location.longitude]}
-                      icon={restaurantIcon}
+            <div className="sticky top-0 z-10 bg-white/80 rounded-md p-4 shadow-sm mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+                <div className="flex-1 flex flex-col sm:flex-row sm:items-end gap-4">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search by name or address…"
+                      className="w-full pl-10 pr-3 py-2 rounded-md border focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <svg
+                      className="absolute left-3 bottom-2.5 w-5 h-5 text-gray-400"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
                     >
-                      <Popup>
-                        {r.storeName}
-                        <br />
-                        {r.address}
-                        <br />
-                        {r.distance.toFixed(2)} km away
-                      </Popup>
-                    </Marker>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"
+                      />
+                    </svg>
+                  </div>
+
+                  <div className="inline-flex items-center gap-2 shrink-0">
+                    <label className="text-sm font-medium text-gray-600 whitespace-nowrap m-0">
+                      Sort by:
+                    </label>
+
+                    <select
+                      id="sortBy"
+                      value={filters.sort}
+                      onChange={(e) =>
+                        setFilters((f) => ({ ...f, sort: e.target.value }))
+                      }
+                      className="border rounded-md py-2 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="distance">Distance</option>
+                      <option value="rating">Rating</option>
+                      <option value="name">Name (A→Z)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Availability
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={filters.openNow}
+                        onChange={(e) =>
+                          setFilters((f) => ({
+                            ...f,
+                            openNow: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      Open now
+                    </label>
+                  </div>
+                </div>
+
+                <div
+                  className="flex-none w-28 text-right text-sm text-gray-500 self-end tabular-nums select-none"
+                  aria-live="polite"
+                >
+                  {filteredRestaurants.length}{" "}
+                  {filteredRestaurants.length === 1 ? "result" : "results"}
+                </div>
+              </div>
+
+              {filters.types.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  {filters.types.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => toggleType(t)}
+                      className="px-2.5 py-1 rounded-full border text-xs bg-blue-50 border-blue-200 text-blue-700"
+                      title="Remove filter"
+                    >
+                      {t} ×
+                    </button>
                   ))}
-              </MapContainer>
+                  <button
+                    onClick={clearTypes}
+                    className="text-xs text-blue-700 hover:underline"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="w-full rounded overflow-hidden border border-gray-300 mt-4 mb-4">
+              <div className="h-72 md:h-80 lg:h-96 relative">
+                <MapContainer
+                  center={userLatLng}
+                  zoom={parseInt(sessionStorage.getItem("userMapZoom")) || 11} //Restore session level or fallback to 11
+                  scrollWheelZoom={false}
+                  style={{ height: "100%", width: "100%", zIndex: 0 }}
+                >
+                  <MapSetTo position={userLatLng} />
+                  <ZoomToRadius
+                    setSearchRadius={setSearchRadius}
+                    setMapInstance={setMapInstance}
+                  />
+                  {shouldFitBounds && (
+                    <FitBoundsView
+                      markers={[
+                        userLatLng,
+                        ...restaurantsWithinRange.map((r) => [
+                          r.location.latitude,
+                          r.location.longitude,
+                        ]),
+                      ]}
+                    />
+                  )}
+                  <TileLayer
+                    attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <Marker position={userLatLng}>
+                    <Popup>Your delivery location</Popup>
+                  </Marker>
+
+                  {allRestaurants
+                    .map((r) => {
+                      const rLat = r.location?.latitude;
+                      const rLng = r.location?.longitude;
+                      if (!rLat || !rLng) return null;
+
+                      const distance = getDistanceInKm(
+                        userLatLng[0],
+                        userLatLng[1],
+                        rLat,
+                        rLng
+                      );
+
+                      return { ...r, distance: parseFloat(distance) };
+                    })
+                    .filter((r) => r && r.distance <= 100)
+                    .map((r) => (
+                      <Marker
+                        key={r.id}
+                        position={[r.location.latitude, r.location.longitude]}
+                        icon={restaurantIcon}
+                      >
+                        <Popup>
+                          {r.storeName}
+                          <br />
+                          {r.address}
+                          <br />
+                          {r.distance.toFixed(2)} km away
+                        </Popup>
+                      </Marker>
+                    ))}
+                </MapContainer>
+              </div>
             </div>
 
             <h2 className="mt-8 text-xl">
               Nearby Restaurants within {searchRadius} km
             </h2>
-            <div className="mt-4 space-y-6">
-              {filteredTypes.map((type) => (
-                <div key={type}>
-                  <h3 className="text-lg font-semibold mb-2">{type}</h3>
-                  <ul className="space-y-2">
-                    {groupedFilteredByType[type].map((r) => {
-                      const rLat = r.location?.latitude;
-                      const rLng = r.location?.longitude;
-                      const distance =
-                        rLat && rLng
-                          ? getDistanceInKm(
-                              userLatLng[0],
-                              userLatLng[1],
-                              rLat,
-                              rLng
-                            )
-                          : null;
-                      const isExpanded = expandedRestaurantId === r.id;
 
-                      return (
-                        <li
-                          key={r.id}
-                          className="border p-2 rounded shadow cursor-pointer"
-                          onClick={() => {
-                            const encodedName = encodeURIComponent(r.storeName);
-                            const encodedId = encodeURIComponent(
-                              r.restaurantId
-                            );
-                            navigate(
-                              `/user/${encodedName}/${encodedId}/order`,
-                              { state: { restaurant: r } }
-                            );
-                          }}
+            {filteredRestaurants.length === 0 ? (
+              <p className="mt-4 text-sm text-gray-600 italic">
+                No restaurants match your filters.
+              </p>
+            ) : (
+              <div
+                className="
+      mt-4
+      grid grid-cols-1 sm:grid-cols-2      /* 2 per row on small+ screens */
+      gap-4
+    "
+              >
+                {filteredRestaurants.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      const encodedName = encodeURIComponent(r.storeName);
+                      const encodedId = encodeURIComponent(r.restaurantId);
+                      navigate(`/user/${encodedName}/${encodedId}/order`, {
+                        state: { restaurant: r },
+                      });
+                    }}
+                    className="
+          text-left
+          border rounded-lg shadow-sm
+          bg-white hover:shadow-md transition
+          p-4
+          focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer
+        "
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <h4 className="font-semibold">
+                        {r.storeName}
+                        <span className="ml-2 text-sm text-gray-600">
+                          {typeof r.distance === "number"
+                            ? `— ${r.distance.toFixed(2)} km`
+                            : "— Location missing"}
+                        </span>
+                      </h4>
+                      <span className="shrink-0 text-sm font-medium">
+                        {r.rating ?? "N/A"}★
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-sm text-gray-700">{r.address}</p>
+
+                    {r.hours && (
+                      <p className="mt-2 font-medium">
+                        <span
+                          className={`text-sm ${
+                            isRestaurantOpenToday(r.hours, currentDateTime)
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
                         >
-                          <h4 className="font-semibold">
-                            {r.storeName} â€” Rating: {r.rating}
-                            {distance ? (
-                              <span className="text-sm text-gray-600">
-                                {" "}
-                                â€” {distance} km away
-                              </span>
-                            ) : (
-                              <span className="text-sm text-red-600">
-                                {" "}
-                                â€” Location missing
-                              </span>
-                            )}
-                          </h4>
-                          <p className="text-sm text-gray-700">{r.address}</p>
-                          <p className="font-semibold">
-                            {r.hours && (
-                              <>
-                                <span
-                                  className={`ml-2 text-sm font-medium ${
-                                    isRestaurantOpenToday(
-                                      r.hours,
-                                      currentDateTime
-                                    )
-                                      ? "text-green-600"
-                                      : "text-red-600"
-                                  }`}
-                                >
-                                  {isRestaurantOpenToday(
-                                    r.hours,
-                                    currentDateTime
-                                  )
-                                    ? "Open "
-                                    : "Closed "}
-                                </span>
-
-                                {/* Show todayâ€™s hours inline */}
-                                <span className="ml-2 text-sm text-gray-500">
-                                  (
-                                  {(() => {
-                                    const dayName =
-                                      new Date().toLocaleDateString("en-US", {
-                                        weekday: "long",
-                                      });
-                                    const todayHours = r.hours.find(
-                                      (entry) => entry[dayName]
-                                    );
-                                    if (!todayHours) return "No hours set";
-
-                                    const opening = todayHours[dayName].Opening;
-                                    const closing = todayHours[dayName].Closing;
-                                    return `${formatTime(
-                                      opening
-                                    )} - ${formatTime(closing)}`;
-                                  })()}
-                                  )
-                                </span>
-                              </>
-                            )}
-                          </p>
-
-                          {/* Only show available menu items */}
-                          {isExpanded &&
-                            r.menu &&
-                            r.menu.filter((item) => item.available).length >
-                              0 && (
-                              <ul className="mt-4 space-y-4">
-                                {r.menu
-                                  .filter((item) => item.available)
-                                  .map((item, index) => (
-                                    <li
-                                      key={index}
-                                      className="border rounded p-3 shadow-sm flex flex-col sm:flex-row sm:items-start gap-4"
-                                    >
-                                      <div className="flex items-start space-x-4">
-                                        {item.imgUrl && (
-                                          <img
-                                            src={item.imgUrl}
-                                            alt={item.name}
-                                            style={{
-                                              width: "100px",
-                                              height: "100px",
-                                              objectFit: "cover",
-                                            }}
-                                            className="rounded shrink-0"
-                                          />
-                                        )}
-                                        <div>
-                                          <h5 className="font-semibold">
-                                            {item.name}
-                                          </h5>
-                                          <p className="text-sm text-gray-600">
-                                            {item.description}
-                                          </p>
-                                          <p className="text-sm text-gray-500">
-                                            Calories: {item.calories}
-                                          </p>
-                                          <p className="text-sm font-medium">
-                                            ${item.price?.toFixed(2)}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </li>
-                                  ))}
-                              </ul>
-                            )}
-
-                          {isExpanded &&
-                            (!r.menu ||
-                              r.menu.filter((item) => item.available).length ===
-                                0) && (
-                              <p className="mt-2 text-sm italic text-gray-500">
-                                No menu available.
-                              </p>
-                            )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </div>
+                          {isRestaurantOpenToday(r.hours, currentDateTime)
+                            ? "Open"
+                            : "Closed"}
+                        </span>
+                        <span className="ml-2 text-sm text-gray-500">
+                          {(() => {
+                            const dayName = new Date().toLocaleDateString(
+                              "en-US",
+                              { weekday: "long" }
+                            );
+                            const todayHours = r.hours.find(
+                              (entry) => entry[dayName]
+                            );
+                            if (!todayHours) return "(No hours set)";
+                            const opening = todayHours[dayName].Opening;
+                            const closing = todayHours[dayName].Closing;
+                            return `(${formatTime(opening)} - ${formatTime(
+                              closing
+                            )})`;
+                          })()}
+                        </span>
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
 
