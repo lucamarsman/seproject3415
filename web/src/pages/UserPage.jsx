@@ -181,7 +181,7 @@ function isRestaurantOpenToday(hoursArray, now = new Date()) {
     !Closing ||
     Opening.length !== 4 ||
     Closing.length !== 4 ||
-    Opening === Closing // 🔒 Same open/close time → closed
+    Opening === Closing // ðŸ”’ Same open/close time â†’ closed
   ) {
     return false;
   }
@@ -221,6 +221,8 @@ export default function UserPage() {
   const [userData, setUserData] = useState(null);
   const [fetchingUser, setFetchingUser] = useState(true);
   const [error, setError] = useState(null);
+  const [nameInput, setNameInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
   const [addressInput, setAddressInput] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -262,7 +264,7 @@ export default function UserPage() {
 
     const fetchOrCreateUser = async () => {
       try {
-        const uid = user.uid; // 👈 get the Firebase Auth UID
+        const uid = user.uid; // ðŸ‘ˆ get the Firebase Auth UID
         const userRef = doc(db, "users", uid);
         const userSnap = await getDoc(userRef);
 
@@ -277,6 +279,8 @@ export default function UserPage() {
             ]);
           }
 
+          setNameInput(userDoc?.name || user.displayName || "");
+          setEmailInput(userDoc?.email || user.email || "");
           setPhoneInput(userDoc.phone || "");
           setAddressInput(userDoc.address || "");
           setFetchingUser(false);
@@ -429,18 +433,28 @@ export default function UserPage() {
   }, [userData?.id]);
 
   // Handle phone and address update form submit
-  const phoneRegex = /^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/;
+  const phoneRegex = /^[0-9()+\-\s.]{7,20}$/;
+
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
-    if (!userData) return;
+    if (!userData || savingProfile) return;
 
+    // Basic validation for new editable fields
+    if (!nameInput.trim()) {
+      alert("Please enter your name.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailInput.trim())) {
+      alert("Please enter a valid email.");
+      return;
+    }
     if (!addressInput.trim()) {
       alert("Please enter your address.");
       return;
     }
-
     if (!phoneRegex.test(phoneInput.trim())) {
-      alert("Please enter a valid phone number (e.g. 555-123-4567).");
+      alert("Please enter a valid phone number.");
       return;
     }
 
@@ -448,24 +462,25 @@ export default function UserPage() {
     setError(null);
 
     try {
+      // keep deliveryLocation in sync (optional; remove if you donâ€™t geocode)
       const { lat, lng } = await geocodeAddress(addressInput.trim());
 
       const userRef = doc(db, "users", userData.id);
       const updatedFields = {
-        address: addressInput.trim(),
-        deliveryLocation: new GeoPoint(lat, lng),
+        name: nameInput.trim(),
+        email: emailInput.trim(), // stored in users doc (not Auth)
         phone: phoneInput.trim(),
+        address: addressInput.trim(),
+        ...(lat && lng ? { deliveryLocation: new GeoPoint(lat, lng) } : {}),
       };
 
       await updateDoc(userRef, updatedFields);
 
-      setUserData((prev) => ({
-        ...prev,
-        ...updatedFields,
-      }));
+      // reflect locally
+      setUserData((prev) => ({ ...prev, ...updatedFields }));
+      if (lat && lng) setUserLatLng([lat, lng]);
 
-      setUserLatLng([lat, lng]);
-      alert("Profile updated successfully!");
+      alert("Profile updated.");
     } catch (err) {
       console.error("Failed to update profile:", err);
       setError("Failed to update your profile. Please try again.");
@@ -526,7 +541,7 @@ export default function UserPage() {
 
       <main className="flex-1 p-6 overflow-y-auto">
         <h1 className="text-2xl font-bold">
-          Welcome, {user.displayName} (User)
+          Welcome, {userData?.name || user.displayName || user.email} (User)
         </h1>
 
         {activeTab === "orders" && (
@@ -550,11 +565,23 @@ export default function UserPage() {
                         <strong>Status:</strong> {order.deliveryStatus}
                       </p>
                       <p>
-                        <strong>Restaurant:</strong> {order.restaurantAddress}
+                        <strong>Restaurant:</strong>{" "}
+                        {order.fromRestaurant || "Restaurant"}{" "}
+                        <span className="text-gray-600">
+                          â€” {order.restaurantAddress}
+                        </span>
                       </p>
                       <p>
+                        <strong>Total:</strong> $
+                        {Number(order.payment ?? 0).toFixed(2)}
+                      </p>
+                      {/* <p>
                         <strong>Estimated Ready Time:</strong>{" "}
                         {order.estimatedReadyTime?.toDate().toLocaleString()}
+                      </p> */}
+                      <p>
+                        <strong>Order Date:</strong>{" "}
+                        {order.createdAt?.toDate().toLocaleString()}
                       </p>
                       <div className="mt-2">
                         <strong>Items:</strong>
@@ -580,30 +607,53 @@ export default function UserPage() {
               <table className="w-full table-fixed border border-gray-300 mt-4">
                 <thead className="bg-gray-100">
                   <tr>
-                    <th className="text-left px-4 py-2 border-b w-1/6">
+                    <th className="text-left px-4 py-2 border-b w-1/5">
                       Field
                     </th>
-                    <th className="text-left px-4 py-2 border-b w-1/3">
-                      Value
-                    </th>
-                    <th className="text-left px-4 py-2 border-b w-1/6">
-                      Actions
-                    </th>
+                    <th className="text-left px-4 py-2 border-b">Value</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {/* Non-editable fields */}
+                  {/* Non-editable fields
+                <tr>
+                  <td className="px-4 py-2 border-b align-top">Name</td>
+                  <td className="px-4 py-2 border-b" colSpan={2}>
+                    {userData?.name || user.displayName}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 border-b align-top">Email</td>
+                  <td className="px-4 py-2 border-b" colSpan={2}>
+                    {userData?.email || user.email}
+                  </td>
+                </tr> */}
+
+                  {/* Editable name input */}
                   <tr>
                     <td className="px-4 py-2 border-b align-top">Name</td>
-                    <td className="px-4 py-2 border-b" colSpan={2}>
-                      {userData?.name || user.displayName}
+                    <td className="px-4 py-2 border-b">
+                      <input
+                        type="text"
+                        className="border px-4 py-2 text-base rounded w-full"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        placeholder="Your full name"
+                      />
                     </td>
                   </tr>
+
+                  {/* Editable Email input */}
                   <tr>
                     <td className="px-4 py-2 border-b align-top">Email</td>
-                    <td className="px-4 py-2 border-b" colSpan={2}>
-                      {userData?.email || user.email}
+                    <td className="px-4 py-2 border-b">
+                      <input
+                        type="email"
+                        className="border px-4 py-2 text-base rounded w-full"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        placeholder="name@example.com"
+                      />
                     </td>
                   </tr>
 
@@ -613,7 +663,7 @@ export default function UserPage() {
                     <td className="px-4 py-2 border-b">
                       <input
                         type="tel"
-                        className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
+                        className="border px-4 py-2 text-base rounded w-full"
                         value={phoneInput}
                         onChange={(e) => setPhoneInput(e.target.value)}
                         placeholder="555-123-4567"
@@ -627,25 +677,26 @@ export default function UserPage() {
                     <td className="px-4 py-2 border-b">
                       <input
                         type="text"
-                        className="border px-4 py-2 text-base rounded w-full max-w-[60ch]"
+                        className="border px-4 py-2 text-base rounded w-full"
                         value={addressInput}
                         onChange={(e) => setAddressInput(e.target.value)}
                         placeholder="123 Main St, City, Country"
                       />
                     </td>
-                    {/* The button spans two rows */}
-                    <td className="px-4 py-2 border-b align-top" rowSpan={1}>
-                      <button
-                        type="submit"
-                        className="bg-blue-600 text-white px-4 py-2 rounded text-sm w-full"
-                        disabled={savingProfile}
-                      >
-                        {savingProfile ? "Saving..." : "Update"}
-                      </button>
-                    </td>
                   </tr>
                 </tbody>
               </table>
+
+              {/* Single, consistent action area */}
+              <div className="flex justify-end mt-3">
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-5 py-2 rounded text-sm"
+                  disabled={savingProfile}
+                >
+                  {savingProfile ? "Saving..." : "Update"}
+                </button>
+              </div>
             </form>
           </>
         )}
@@ -755,16 +806,16 @@ export default function UserPage() {
                           }}
                         >
                           <h4 className="font-semibold">
-                            {r.storeName} — Rating: {r.rating}
+                            {r.storeName} â€” Rating: {r.rating}
                             {distance ? (
                               <span className="text-sm text-gray-600">
                                 {" "}
-                                — {distance} km away
+                                â€” {distance} km away
                               </span>
                             ) : (
                               <span className="text-sm text-red-600">
                                 {" "}
-                                — Location missing
+                                â€” Location missing
                               </span>
                             )}
                           </h4>
@@ -790,7 +841,7 @@ export default function UserPage() {
                                     : "Closed "}
                                 </span>
 
-                                {/* Show today’s hours inline */}
+                                {/* Show todayâ€™s hours inline */}
                                 <span className="ml-2 text-sm text-gray-500">
                                   (
                                   {(() => {
@@ -933,7 +984,7 @@ export default function UserPage() {
 * Later: Do not allow orders on closed stores, do not show closed stores, do not retrieve closed stores
 * Later: If a courier is not in range of the closing time of a restaurant (show the location, but do not allow orders)
 * Later: To reduce LIST search results (Fetch restaurants):
-    ~ 1. filter all by distance (max distance up to 100km) -> Done with toggling +/- ✅
+    ~ 1. filter all by distance (max distance up to 100km) -> Done with toggling +/- âœ…
     ~ 2. filter by open hours -> possibly keep, but closed are ordered to lowest on list
     ~ 3. no places with the same name after 5 occurances
 * Maybe: Since anyone can create a restaurant, many can appear on the map. Preferential appearance based on totalOrders from unique userId. Advanced (restaurant): Paid preferential appearance option like Google Search.
