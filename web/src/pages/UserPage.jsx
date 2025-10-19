@@ -975,7 +975,7 @@ export default function UserPage() {
                     <Popup>Your delivery location</Popup>
                   </Marker>
 
-                  {allRestaurants
+                  {filteredRestaurants
                     .map((r) => {
                       const rLat = r.location?.latitude;
                       const rLng = r.location?.longitude;
