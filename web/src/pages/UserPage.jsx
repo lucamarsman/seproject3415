@@ -15,32 +15,15 @@ import { auth, db } from "../firebase";
 import { Navigate, useNavigate } from "react-router-dom";
 import "../App.css";
 
-import homeIcon from "../assets/home.svg";
-import messagesIcon from "../assets/messages.svg";
-import settingsIcon from "../assets/settings.svg";
-import ordersIcon from "../assets/orders.svg";
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
 import HomeTab from "../components/UserPage/homeTab";
 import MessageTab from "../components/UserPage/messageTab";
 import SettingTab from "../components/UserPage/settingTab";
 import OrderTab from "../components/UserPage/orderTab";
+import Sidebar from "../components/UserPage/sideBar";
 
-// Info for cuisine filter buttons
-const cuisineBtns = [
-  { type: "Pizza", label: "Pizza", icon: "🍕" },
-  { type: "Fast Food", label: "Fast Food", icon: "🍔" },
-  { type: "Sushi", label: "Sushi", icon: "🍣" },
-  { type: "Indian", label: "Indian", icon: "🥘" },
-  { type: "Fine Dining", label: "Fine Dining", icon: "🍷" },
-  { type: "Middle Eastern", label: "Middle Eastern", icon: "🍢" },
-  { type: "Mexican", label: "Mexican", icon: "🌮" },
-  { type: "Chinese", label: "Chinese", icon: "🥡" },
-  { type: "Italian", label: "Italian", icon: "🍝" },
-  { type: "Greek", label: "Greek", icon: "🥙" },
-  { type: "BBQ", label: "BBQ", icon: "🍖" },
-  { type: "Vegan", label: "Vegan", icon: "🥗" },
-];
+import { dummyRestaurants } from "../assets/dummyRestaurants.js";
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -149,6 +132,13 @@ export default function UserPage() {
   const [userOrders, setUserOrders] = useState([]);
   const [userMessages, setUserMessages] = useState([]);
   const [activeTab, setActiveTab] = useState("home");
+  const [formError, setFormError] = useState("");
+  const [formSuccess, setFormSuccess] = useState("");
+
+  const clearFormMessages = () => {
+    setFormError("");
+    setFormSuccess("");
+  };
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
@@ -249,7 +239,7 @@ export default function UserPage() {
         const snap = await getDocs(collection(db, "restaurants"));
         const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        setAllRestaurants(fetched); //all restaurants on initial fetch appear on map
+        setAllRestaurants([...fetched, ...dummyRestaurants]); //all restaurants on initial fetch appear on map - includes dummy restaurants to test UI/UX
         // only those restaurants user toggles with +/- appear on list (filtered by distance)
       } catch (err) {
         console.error("Error fetching restaurants:", err);
@@ -392,11 +382,36 @@ export default function UserPage() {
       },
       (error) => {
         console.error("Error listening to user messages:", error);
-        // Handle error fetching messages (optional)
+        // Handle error fetching messages here
       }
     );
     return () => unsub();
   }, [userData?.id]);
+
+  // Clears settings form on tab switch
+  useEffect(() => {
+    clearFormMessages();
+  }, [activeTab]);
+
+  // Repopulate user setting fields when switching to settings tab or when data changes
+  useEffect(() => {
+    if (activeTab !== "settings" || !userData) return;
+
+    setNameInput(userData.name || user?.displayName || "");
+    setEmailInput(userData.email || user?.email || "");
+    setPhoneInput(userData.phone || "");
+    setAddressInput(userData.address || "");
+  }, [activeTab, userData, user]);
+
+  // Reset scroll when switching tabs or applying filters/search
+  useEffect(() => {
+    const container = document.getElementById("scrollable-panel");
+    if (container) {
+      container.scrollTo({ top: 0, behavior: "auto" }); // instant
+    } else {
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+  }, [activeTab, filters.openNow, filters.sort, searchTerm, filters.types]);
 
   // Handle phone and address update form submit
   const phoneRegex = /^[0-9()+\-\s.]{7,20}$/;
@@ -405,22 +420,24 @@ export default function UserPage() {
     e.preventDefault();
     if (!userData || savingProfile) return;
 
+    clearFormMessages();
+
     // Basic validation for new editable fields
     if (!nameInput.trim()) {
-      alert("Please enter your name.");
+      setFormError("Please enter your name.");
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailInput.trim())) {
-      alert("Please enter a valid email.");
+      setFormError("Please enter a valid email.");
       return;
     }
     if (!addressInput.trim()) {
-      alert("Please enter your address.");
+      setFormError("Please enter your address.");
       return;
     }
     if (!phoneRegex.test(phoneInput.trim())) {
-      alert("Please enter a valid phone number.");
+      setFormError("Please enter a valid phone number.");
       return;
     }
 
@@ -428,7 +445,6 @@ export default function UserPage() {
     setError(null);
 
     try {
-      // keep deliveryLocation in sync (optional; remove if you don't geocode)
       const { lat, lng } = await geocodeAddress(addressInput.trim());
 
       const userRef = doc(db, "users", userData.id);
@@ -446,10 +462,10 @@ export default function UserPage() {
       setUserData((prev) => ({ ...prev, ...updatedFields }));
       if (lat && lng) setUserLatLng([lat, lng]);
 
-      alert("Profile updated.");
+      setFormSuccess("Profile updated.");
     } catch (err) {
       console.error("Failed to update profile:", err);
-      setError("Failed to update your profile. Please try again.");
+      setFormError("The address you entered is invalid or couldn't be found.");
     } finally {
       setSavingProfile(false);
     }
@@ -464,108 +480,13 @@ export default function UserPage() {
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <aside className="w-64 bg-white border-r border-gray-300 p-4 sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-hidden">
-        <div className="flex flex-col space-y-2">
-          <button
-            onClick={() => setActiveTab("home")}
-            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
-    ${
-      activeTab === "home"
-        ? "bg-gray-200 text-gray-800"
-        : "hover:bg-gray-100 text-gray-800"
-    }
-  `}
-          >
-            <img src={homeIcon} className="w-5 h-5 object-contain" alt="Home" />
-            Home
-          </button>
-
-          <button
-            onClick={() => setActiveTab("messages")}
-            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
-    ${
-      activeTab === "messages"
-        ? "bg-gray-200 text-gray-800"
-        : "hover:bg-gray-100 text-gray-800"
-    }
-  `}
-          >
-            <img
-              src={messagesIcon}
-              className="w-5 h-5 object-contain"
-              alt="Messages"
-            />
-            Messages
-          </button>
-
-          <button
-            onClick={() => setActiveTab("settings")}
-            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
-    ${
-      activeTab === "settings"
-        ? "bg-gray-200 text-gray-800"
-        : "hover:bg-gray-100 text-gray-800"
-    }
-  `}
-          >
-            <img
-              src={settingsIcon}
-              className="w-5 h-5 object-contain"
-              alt="Settings"
-            />
-            Settings
-          </button>
-
-          <button
-            onClick={() => setActiveTab("orders")}
-            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
-    ${
-      activeTab === "orders"
-        ? "bg-gray-200 text-gray-800"
-        : "hover:bg-gray-100 text-gray-800"
-    }
-  `}
-          >
-            <img
-              src={ordersIcon}
-              className="w-5 h-5 object-contain"
-              alt="My Orders"
-            />
-            My Orders
-          </button>
-
-          <hr className="my-1 border-gray-300" />
-          <div className="mt-3">
-            <div className="flex flex-col items-center space-y-3">
-              {cuisineBtns.map(({ type, label, icon }) => {
-                const active = filters.types.includes(type);
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => {
-                      toggleType(type);
-                      setActiveTab("home");
-                    }}
-                    className={`flex items-center justify-start w-[200px] px-2 py-0 rounded-lg border font-medium text-base transition-all cursor-pointer
-          ${
-            active
-              ? "bg-blue-600 text-white border-blue-600 shadow-md"
-              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50 hover:shadow"
-          }`}
-                    aria-pressed={active}
-                  >
-                    <span className="inline-flex items-center justify-center w-8 h-8 mr-3 text-2xl">
-                      {icon}
-                    </span>
-                    <span>{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </aside>
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        filters={filters}
+        toggleType={toggleType}
+        clearTypes={clearTypes}
+      />
 
       <main className="flex-1 p-6 overflow-y-auto">
         {activeTab === "orders" && <OrderTab userOrders={userOrders} />}
@@ -584,6 +505,9 @@ export default function UserPage() {
             setAddressInput={setAddressInput}
             savingProfile={savingProfile}
             onSubmit={handleProfileSubmit}
+            formError={formError}
+            formSuccess={formSuccess}
+            onClearMessages={clearFormMessages}
           />
         )}
 
