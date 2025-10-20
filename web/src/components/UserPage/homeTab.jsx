@@ -240,7 +240,7 @@ export default function HomeTab({
               <button
                 key={t}
                 onClick={() => toggleType(t)}
-                className="px-2.5 py-1 rounded-full border text-xs bg-blue-50 border-blue-200 text-blue-700"
+                className="px-2.5 py-1 rounded-full border text-xs bg-blue-50 border-blue-200 text-blue-700 cursor-pointer"
                 title="Remove filter"
               >
                 {t} ×
@@ -248,7 +248,7 @@ export default function HomeTab({
             ))}
             <button
               onClick={clearTypes}
-              className="text-xs text-blue-700 hover:underline"
+              className="text-xs text-blue-700 hover:underline cursor-pointer"
             >
               Clear all
             </button>

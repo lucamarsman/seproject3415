@@ -11,6 +11,9 @@ export default function SettingsTab({
   setAddressInput,
   savingProfile,
   onSubmit,
+  formError,
+  formSuccess,
+  onClearMessages,
 }) {
   return (
     <>
@@ -42,7 +45,10 @@ export default function SettingsTab({
             type="text"
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
+            onChange={(e) => {
+              onClearMessages();
+              setNameInput(e.target.value);
+            }}
             placeholder="Your full name"
           />
         </div>
@@ -53,7 +59,10 @@ export default function SettingsTab({
             type="email"
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={emailInput}
-            onChange={(e) => setEmailInput(e.target.value)}
+            onChange={(e) => {
+              onClearMessages();
+              setEmailInput(e.target.value);
+            }}
             placeholder="name@example.com"
           />
         </div>
@@ -64,7 +73,10 @@ export default function SettingsTab({
             type="tel"
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={phoneInput}
-            onChange={(e) => setPhoneInput(e.target.value)}
+            onChange={(e) => {
+              onClearMessages();
+              setPhoneInput(e.target.value);
+            }}
             placeholder="555-123-4567"
           />
         </div>
@@ -77,9 +89,31 @@ export default function SettingsTab({
             type="text"
             className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={addressInput}
-            onChange={(e) => setAddressInput(e.target.value)}
+            onChange={(e) => {
+              onClearMessages();
+              setAddressInput(e.target.value);
+            }}
             placeholder="123 Main St, City, Country"
           />
+        </div>
+
+        <div className="min-h-[56px]">
+          {formError && (
+            <div
+              role="alert"
+              className="text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-2"
+            >
+              {formError}
+            </div>
+          )}
+          {!formError && formSuccess && (
+            <div
+              role="status"
+              className="text-green-700 bg-green-50 border border-green-200 rounded-md px-4 py-2"
+            >
+              {formSuccess}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end pt-4">
