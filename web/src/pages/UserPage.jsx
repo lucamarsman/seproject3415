@@ -23,6 +23,7 @@ import messagesIcon from "../assets/messages.svg";
 import settingsIcon from "../assets/settings.svg";
 import ordersIcon from "../assets/orders.svg";
 import defaultProfileImg from "../assets/defaultProfile.svg";
+import editIcon from "../assets/edit.svg";
 
 // MAP VIEW: React Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -707,7 +708,7 @@ export default function UserPage() {
                         <strong>Restaurant:</strong>{" "}
                         {order.fromRestaurant || "Restaurant"}{" "}
                         <span className="text-gray-600">
-                          â€” {order.restaurantAddress}
+                          — {order.restaurantAddress}
                         </span>
                       </p>
                       <p>
@@ -741,100 +742,89 @@ export default function UserPage() {
 
         {activeTab === "settings" && (
           <>
-            <img
-              src={defaultProfileImg}
-              className="w-50 h-50 object-cover rounded-full m-auto"
-            ></img>
+            <div className="flex flex-col items-center mt-8 relative">
+              <div className="relative w-32 h-32">
+                <img
+                  src={defaultProfileImg}
+                  alt="Profile"
+                  className="w-32 h-32 object-cover rounded-full border-4 border-white shadow-md"
+                />
+                <button
+                  type="button"
+                  className="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-md transition-all cursor-pointer"
+                >
+                  <img src={editIcon} alt="Edit" className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
             <hr className="my-8 border-t-2 border-gray-300" />
-            <form onSubmit={handleProfileSubmit}>
-              <table className="w-full table-fixed border border-gray-300 mt-4">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="text-left px-4 py-2 border-b w-1/5">
-                      Field
-                    </th>
-                    <th className="text-left px-4 py-2 border-b">Value</th>
-                  </tr>
-                </thead>
 
-                <tbody>
-                  {/* Non-editable fields
-                <tr>
-                  <td className="px-4 py-2 border-b align-top">Name</td>
-                  <td className="px-4 py-2 border-b" colSpan={2}>
-                    {userData?.name || user.displayName}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="px-4 py-2 border-b align-top">Email</td>
-                  <td className="px-4 py-2 border-b" colSpan={2}>
-                    {userData?.email || user.email}
-                  </td>
-                </tr> */}
+            <form
+              onSubmit={handleProfileSubmit}
+              className="max-w-2xl mx-auto bg-white shadow-md rounded-xl p-6 space-y-5"
+            >
+              {/* Name */}
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  placeholder="Your full name"
+                />
+              </div>
 
-                  {/* Editable name input */}
-                  <tr>
-                    <td className="px-4 py-2 border-b align-top">Name</td>
-                    <td className="px-4 py-2 border-b">
-                      <input
-                        type="text"
-                        className="border px-4 py-2 text-base rounded w-full"
-                        value={nameInput}
-                        onChange={(e) => setNameInput(e.target.value)}
-                        placeholder="Your full name"
-                      />
-                    </td>
-                  </tr>
+              {/* Email */}
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </div>
 
-                  {/* Editable Email input */}
-                  <tr>
-                    <td className="px-4 py-2 border-b align-top">Email</td>
-                    <td className="px-4 py-2 border-b">
-                      <input
-                        type="email"
-                        className="border px-4 py-2 text-base rounded w-full"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        placeholder="name@example.com"
-                      />
-                    </td>
-                  </tr>
+              {/* Phone */}
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                  placeholder="555-123-4567"
+                />
+              </div>
 
-                  {/* Editable Phone input */}
-                  <tr>
-                    <td className="px-4 py-2 border-b align-top">Phone</td>
-                    <td className="px-4 py-2 border-b">
-                      <input
-                        type="tel"
-                        className="border px-4 py-2 text-base rounded w-full"
-                        value={phoneInput}
-                        onChange={(e) => setPhoneInput(e.target.value)}
-                        placeholder="555-123-4567"
-                      />
-                    </td>
-                  </tr>
+              {/* Address */}
+              <div>
+                <label className="block text-gray-700 font-medium mb-1">
+                  Address
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={addressInput}
+                  onChange={(e) => setAddressInput(e.target.value)}
+                  placeholder="123 Main St, City, Country"
+                />
+              </div>
 
-                  {/* Editable Address input */}
-                  <tr>
-                    <td className="px-4 py-2 border-b align-top">Address</td>
-                    <td className="px-4 py-2 border-b">
-                      <input
-                        type="text"
-                        className="border px-4 py-2 text-base rounded w-full"
-                        value={addressInput}
-                        onChange={(e) => setAddressInput(e.target.value)}
-                        placeholder="123 Main St, City, Country"
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Single, consistent action area */}
-              <div className="flex justify-end mt-3">
+              {/* Action Button */}
+              <div className="flex justify-end pt-4">
                 <button
                   type="submit"
-                  className="bg-blue-600 text-white px-5 py-2 rounded text-sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-all cursor-pointer"
                   disabled={savingProfile}
                 >
                   {savingProfile ? "Saving..." : "Update"}
