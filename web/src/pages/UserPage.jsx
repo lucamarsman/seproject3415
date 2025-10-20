@@ -3,7 +3,6 @@ import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   getDocs,
-  addDoc,
   updateDoc,
   GeoPoint,
   Timestamp,
@@ -14,8 +13,6 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { Navigate, useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
 import "../App.css";
 
 import homeIcon from "../assets/home.svg";
@@ -24,108 +21,26 @@ import settingsIcon from "../assets/settings.svg";
 import ordersIcon from "../assets/orders.svg";
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
+import HomeTab from "../components/UserPage/homeTab";
+import MessageTab from "../components/UserPage/messageTab";
+import SettingTab from "../components/UserPage/settingTab";
+import OrderTab from "../components/UserPage/orderTab";
 
-// MAP VIEW: React Leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-  iconUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-});
-
-const restaurantIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/1046/1046784.png",
-  iconSize: [32, 32],
-  iconAnchor: [16, 32], // half width, full height
-  popupAnchor: [0, -32], // position popup above icon
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-  shadowSize: [41, 41],
-  shadowAnchor: [13, 41],
-});
-
-function FitBoundsView({ markers }) {
-  const map = useMap();
-  const [hasFit, setHasFit] = useState(false);
-
-  useEffect(() => {
-    const savedZoom = sessionStorage.getItem("userMapZoom");
-
-    // Don't fit bounds if zoom already restored
-    if (markers.length < 2 || hasFit || savedZoom) return;
-
-    const bounds = L.latLngBounds(markers);
-    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
-    setHasFit(true);
-  }, [map, markers, hasFit]);
-
-  return null;
-}
-
-function ZoomToRadius({ setSearchRadius, setMapInstance }) {
-  const map = useMap();
-
-  useEffect(() => {
-    setMapInstance(map);
-
-    function handleZoom() {
-      const zoom = map.getZoom();
-      const radius = zoomLevelToKm(zoom);
-      setSearchRadius(radius);
-      sessionStorage.setItem("userMapZoom", zoom.toString()); //save zoom level during session
-    }
-
-    map.on("zoomend", handleZoom);
-    handleZoom(); // Run once on mount
-
-    return () => {
-      map.off("zoomend", handleZoom);
-    };
-  }, [map, setSearchRadius, setMapInstance]);
-
-  return null;
-}
-
-function zoomLevelToKm(zoom) {
-  // Leaflet zoom level to radius (km)
-  const zoomToKm = {
-    8: 100,
-    9: 75,
-    10: 50,
-    11: 25,
-    12: 10,
-    13: 5,
-    14: 2.5,
-    15: 1.5,
-    16: 1,
-    17: 0.5,
-    18: 0.25,
-  };
-  const radius = zoomToKm[zoom] || 100;
-  return Math.min(radius, 100); // restaurants will not show over 100km from address
-}
-
-function MapSetTo({ position }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!position) return;
-
-    const savedZoom = parseInt(sessionStorage.getItem("userMapZoom"));
-    const currentZoom = map.getZoom();
-
-    if (!isNaN(savedZoom)) {
-      map.setView(position, savedZoom); // use saved
-    } else {
-      map.setView(position, currentZoom); // fallback to current
-    }
-  }, [position, map]);
-
-  return null;
-}
+// Info for cuisine filter buttons
+const cuisineBtns = [
+  { type: "Pizza", label: "Pizza", icon: "🍕" },
+  { type: "Fast Food", label: "Fast Food", icon: "🍔" },
+  { type: "Sushi", label: "Sushi", icon: "🍣" },
+  { type: "Indian", label: "Indian", icon: "🥘" },
+  { type: "Fine Dining", label: "Fine Dining", icon: "🍷" },
+  { type: "Middle Eastern", label: "Middle Eastern", icon: "🍢" },
+  { type: "Mexican", label: "Mexican", icon: "🌮" },
+  { type: "Chinese", label: "Chinese", icon: "🥡" },
+  { type: "Italian", label: "Italian", icon: "🍝" },
+  { type: "Greek", label: "Greek", icon: "🥙" },
+  { type: "BBQ", label: "BBQ", icon: "🍖" },
+  { type: "Vegan", label: "Vegan", icon: "🥗" },
+];
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -215,13 +130,6 @@ function isRestaurantOpenToday(hoursArray, now = new Date()) {
   return now >= openTime && now <= closeTime;
 }
 
-function formatTime(timeStr) {
-  if (!timeStr || timeStr.length !== 4) return "Invalid";
-  const hours = timeStr.slice(0, 2);
-  const minutes = timeStr.slice(2);
-  return `${hours}:${minutes}`;
-}
-
 export default function UserPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -233,8 +141,6 @@ export default function UserPage() {
   const [phoneInput, setPhoneInput] = useState("");
   const [addressInput, setAddressInput] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
-  const [expandedRestaurantId, setExpandedRestaurantId] = useState(null);
-  const [mapInstance, setMapInstance] = useState(null);
   const [searchRadius, setSearchRadius] = useState(12); // default 10 km search radius
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [userLatLng, setUserLatLng] = useState([44.413922, -79.707506]); // Georgian Mall Family Dental as fallback
@@ -247,7 +153,6 @@ export default function UserPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
     openNow: false,
-    minRating: null,
     types: [],
     sort: "distance",
   });
@@ -262,22 +167,6 @@ export default function UserPage() {
     });
   };
   const clearTypes = () => setFilters((f) => ({ ...f, types: [] }));
-
-  // Info for cuisine filter buttons
-  const cuisineBtns = [
-    { type: "Pizza", label: "Pizza", icon: "🍕" },
-    { type: "Fast Food", label: "Fast Food", icon: "🍔" },
-    { type: "Sushi", label: "Sushi", icon: "🍣" },
-    { type: "Indian", label: "Indian", icon: "🥘" },
-    { type: "Fine Dining", label: "Fine Dining", icon: "🍷" },
-    { type: "Middle Eastern", label: "Middle Eastern", icon: "🍢" },
-    { type: "Mexican", label: "Mexican", icon: "🌮" },
-    { type: "Chinese", label: "Chinese", icon: "🥡" },
-    { type: "Italian", label: "Italian", icon: "🍝" },
-    { type: "Greek", label: "Greek", icon: "🥙" },
-    { type: "BBQ", label: "BBQ", icon: "🍖" },
-    { type: "Vegan", label: "Vegan", icon: "🥗" },
-  ];
 
   const navigate = useNavigate();
 
@@ -302,11 +191,9 @@ export default function UserPage() {
   useEffect(() => {
     if (!user) return;
 
-    const usersRef = collection(db, "users");
-
     const fetchOrCreateUser = async () => {
       try {
-        const uid = user.uid; // ðŸ‘ˆ get the Firebase Auth UID
+        const uid = user.uid; // Get the Firebase Auth UID
         const userRef = doc(db, "users", uid);
         const userSnap = await getDoc(userRef);
 
@@ -541,7 +428,7 @@ export default function UserPage() {
     setError(null);
 
     try {
-      // keep deliveryLocation in sync (optional; remove if you donâ€™t geocode)
+      // keep deliveryLocation in sync (optional; remove if you don't geocode)
       const { lat, lng } = await geocodeAddress(addressInput.trim());
 
       const userRef = doc(db, "users", userData.id);
@@ -574,9 +461,6 @@ export default function UserPage() {
     return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
 
   if (!user) return <Navigate to="/login" />;
-
-  const restaurantsWithinRange = filteredRestaurants;
-  const shouldFitBounds = restaurantsWithinRange.length > 0;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -684,450 +568,43 @@ export default function UserPage() {
       </aside>
 
       <main className="flex-1 p-6 overflow-y-auto">
-        {activeTab === "orders" && (
-          <>
-            {userOrders.filter((order) => order.orderConfirmed !== false)
-              .length === 0 ? (
-              <p className="text-gray-600 italic">No current orders found.</p>
-            ) : (
-              <div className="space-y-4">
-                {userOrders
-                  .filter((order) => order.orderConfirmed !== false)
-                  .map((order, index) => (
-                    <div
-                      key={order.orderId || index}
-                      className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm"
-                    >
-                      <h3 className="font-semibold text-lg mb-1">
-                        Order #{index + 1}
-                      </h3>
-                      <p>
-                        <strong>Status:</strong> {order.deliveryStatus}
-                      </p>
-                      <p>
-                        <strong>Restaurant:</strong>{" "}
-                        {order.fromRestaurant || "Restaurant"}{" "}
-                        <span className="text-gray-600">
-                          — {order.restaurantAddress}
-                        </span>
-                      </p>
-                      <p>
-                        <strong>Total:</strong> $
-                        {Number(order.payment ?? 0).toFixed(2)}
-                      </p>
-                      {/* <p>
-                        <strong>Estimated Ready Time:</strong>{" "}
-                        {order.estimatedReadyTime?.toDate().toLocaleString()}
-                      </p> */}
-                      <p>
-                        <strong>Order Date:</strong>{" "}
-                        {order.createdAt?.toDate().toLocaleString()}
-                      </p>
-                      <div className="mt-2">
-                        <strong>Items:</strong>
-                        <ul className="list-disc list-inside ml-4">
-                          {order.items?.map((item, idx) => (
-                            <li key={idx}>
-                              {item.name} (x{item.quantity})
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </>
-        )}
+        {activeTab === "orders" && <OrderTab userOrders={userOrders} />}
 
         {activeTab === "settings" && (
-          <>
-            <div className="flex flex-col items-center mt-8 relative">
-              <div className="relative w-32 h-32">
-                <img
-                  src={defaultProfileImg}
-                  alt="Profile"
-                  className="w-32 h-32 object-cover rounded-full border-4 border-white shadow-md"
-                />
-                <button
-                  type="button"
-                  className="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-md transition-all cursor-pointer"
-                >
-                  <img src={editIcon} alt="Edit" className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <hr className="my-8 border-t-2 border-gray-300" />
-
-            <form
-              onSubmit={handleProfileSubmit}
-              className="max-w-2xl mx-auto bg-white shadow-md rounded-xl p-6 space-y-5"
-            >
-              {/* Name */}
-              <div>
-                <label className="block text-gray-700 font-medium mb-1">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  placeholder="Your full name"
-                />
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="block text-gray-700 font-medium mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="name@example.com"
-                />
-              </div>
-
-              {/* Phone */}
-              <div>
-                <label className="block text-gray-700 font-medium mb-1">
-                  Phone
-                </label>
-                <input
-                  type="tel"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value)}
-                  placeholder="555-123-4567"
-                />
-              </div>
-
-              {/* Address */}
-              <div>
-                <label className="block text-gray-700 font-medium mb-1">
-                  Address
-                </label>
-                <input
-                  type="text"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={addressInput}
-                  onChange={(e) => setAddressInput(e.target.value)}
-                  placeholder="123 Main St, City, Country"
-                />
-              </div>
-
-              {/* Action Button */}
-              <div className="flex justify-end pt-4">
-                <button
-                  type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-all cursor-pointer"
-                  disabled={savingProfile}
-                >
-                  {savingProfile ? "Saving..." : "Update"}
-                </button>
-              </div>
-            </form>
-          </>
+          <SettingTab
+            defaultProfileImg={defaultProfileImg}
+            editIcon={editIcon}
+            nameInput={nameInput}
+            setNameInput={setNameInput}
+            emailInput={emailInput}
+            setEmailInput={setEmailInput}
+            phoneInput={phoneInput}
+            setPhoneInput={setPhoneInput}
+            addressInput={addressInput}
+            setAddressInput={setAddressInput}
+            savingProfile={savingProfile}
+            onSubmit={handleProfileSubmit}
+          />
         )}
 
         {activeTab === "home" && (
-          <>
-            <div className="sticky top-0 z-10 bg-white/80 rounded-md p-4 shadow-sm mb-4">
-              <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-                <div className="flex-1 flex flex-col sm:flex-row sm:items-end gap-4">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search by name or address…"
-                      className="w-full pl-10 pr-3 py-2 rounded-md border focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <svg
-                      className="absolute left-3 bottom-2.5 w-5 h-5 text-gray-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"
-                      />
-                    </svg>
-                  </div>
-
-                  <div className="inline-flex items-center gap-2 shrink-0">
-                    <label className="text-sm font-medium text-gray-600 whitespace-nowrap m-0">
-                      Sort by:
-                    </label>
-
-                    <select
-                      id="sortBy"
-                      value={filters.sort}
-                      onChange={(e) =>
-                        setFilters((f) => ({ ...f, sort: e.target.value }))
-                      }
-                      className="border rounded-md py-2 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="distance">Distance</option>
-                      <option value="rating">Rating</option>
-                      <option value="name">Name (A→Z)</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col">
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Availability
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        checked={filters.openNow}
-                        onChange={(e) =>
-                          setFilters((f) => ({
-                            ...f,
-                            openNow: e.target.checked,
-                          }))
-                        }
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      Open now
-                    </label>
-                  </div>
-                </div>
-
-                <div
-                  className="flex-none w-28 text-right text-sm text-gray-500 self-end tabular-nums select-none"
-                  aria-live="polite"
-                >
-                  {filteredRestaurants.length}{" "}
-                  {filteredRestaurants.length === 1 ? "result" : "results"}
-                </div>
-              </div>
-
-              {filters.types.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  {filters.types.map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => toggleType(t)}
-                      className="px-2.5 py-1 rounded-full border text-xs bg-blue-50 border-blue-200 text-blue-700"
-                      title="Remove filter"
-                    >
-                      {t} ×
-                    </button>
-                  ))}
-                  <button
-                    onClick={clearTypes}
-                    className="text-xs text-blue-700 hover:underline"
-                  >
-                    Clear all
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="w-full rounded overflow-hidden border border-gray-300 mt-4 mb-4">
-              <div className="h-72 md:h-80 lg:h-96 relative">
-                <MapContainer
-                  center={userLatLng}
-                  zoom={parseInt(sessionStorage.getItem("userMapZoom")) || 11} //Restore session level or fallback to 11
-                  scrollWheelZoom={false}
-                  style={{ height: "100%", width: "100%", zIndex: 0 }}
-                >
-                  <MapSetTo position={userLatLng} />
-                  <ZoomToRadius
-                    setSearchRadius={setSearchRadius}
-                    setMapInstance={setMapInstance}
-                  />
-                  {shouldFitBounds && (
-                    <FitBoundsView
-                      markers={[
-                        userLatLng,
-                        ...restaurantsWithinRange.map((r) => [
-                          r.location.latitude,
-                          r.location.longitude,
-                        ]),
-                      ]}
-                    />
-                  )}
-                  <TileLayer
-                    attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  <Marker position={userLatLng}>
-                    <Popup>Your delivery location</Popup>
-                  </Marker>
-
-                  {filteredRestaurants
-                    .map((r) => {
-                      const rLat = r.location?.latitude;
-                      const rLng = r.location?.longitude;
-                      if (!rLat || !rLng) return null;
-
-                      const distance = getDistanceInKm(
-                        userLatLng[0],
-                        userLatLng[1],
-                        rLat,
-                        rLng
-                      );
-
-                      return { ...r, distance: parseFloat(distance) };
-                    })
-                    .filter((r) => r && r.distance <= 100)
-                    .map((r) => (
-                      <Marker
-                        key={r.id}
-                        position={[r.location.latitude, r.location.longitude]}
-                        icon={restaurantIcon}
-                      >
-                        <Popup>
-                          {r.storeName}
-                          <br />
-                          {r.address}
-                          <br />
-                          {r.distance.toFixed(2)} km away
-                        </Popup>
-                      </Marker>
-                    ))}
-                </MapContainer>
-              </div>
-            </div>
-
-            <h2 className="mt-8 text-xl">
-              Nearby Restaurants within {searchRadius} km
-            </h2>
-
-            {filteredRestaurants.length === 0 ? (
-              <p className="mt-4 text-sm text-gray-600 italic">
-                No restaurants match your filters.
-              </p>
-            ) : (
-              <div
-                className="
-      mt-4
-      grid grid-cols-1 sm:grid-cols-2      /* 2 per row on small+ screens */
-      gap-4
-    "
-              >
-                {filteredRestaurants.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => {
-                      const encodedName = encodeURIComponent(r.storeName);
-                      const encodedId = encodeURIComponent(r.restaurantId);
-                      navigate(`/user/${encodedName}/${encodedId}/order`, {
-                        state: { restaurant: r },
-                      });
-                    }}
-                    className="
-          text-left
-          border rounded-lg shadow-sm
-          bg-white hover:shadow-md transition
-          p-4
-          focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer
-        "
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <h4 className="font-semibold">
-                        {r.storeName}
-                        <span className="ml-2 text-sm text-gray-600">
-                          {typeof r.distance === "number"
-                            ? `— ${r.distance.toFixed(2)} km`
-                            : "— Location missing"}
-                        </span>
-                      </h4>
-                      <span className="shrink-0 text-sm font-medium">
-                        {r.rating ?? "N/A"}★
-                      </span>
-                    </div>
-
-                    <p className="mt-1 text-sm text-gray-700">{r.address}</p>
-
-                    {r.hours && (
-                      <p className="mt-2 font-medium">
-                        <span
-                          className={`text-sm ${
-                            isRestaurantOpenToday(r.hours, currentDateTime)
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {isRestaurantOpenToday(r.hours, currentDateTime)
-                            ? "Open"
-                            : "Closed"}
-                        </span>
-                        <span className="ml-2 text-sm text-gray-500">
-                          {(() => {
-                            const dayName = new Date().toLocaleDateString(
-                              "en-US",
-                              { weekday: "long" }
-                            );
-                            const todayHours = r.hours.find(
-                              (entry) => entry[dayName]
-                            );
-                            if (!todayHours) return "(No hours set)";
-                            const opening = todayHours[dayName].Opening;
-                            const closing = todayHours[dayName].Closing;
-                            return `(${formatTime(opening)} - ${formatTime(
-                              closing
-                            )})`;
-                          })()}
-                        </span>
-                      </p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
+          <HomeTab
+            userLatLng={userLatLng}
+            filteredRestaurants={filteredRestaurants}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            filters={filters}
+            setFilters={setFilters}
+            clearTypes={clearTypes}
+            toggleType={toggleType}
+            searchRadius={searchRadius}
+            currentDateTime={currentDateTime}
+            navigate={navigate}
+            setSearchRadius={setSearchRadius}
+          />
         )}
 
-        {activeTab === "messages" && (
-          <>
-            <hr className="my-8 border-t-2 border-gray-300" />
-            <h2 className="text-xl font-bold mt-8 mb-4">Messages</h2>
-            {!userMessages || userMessages.length === 0 ? (
-              <p className="text-gray-600 italic">No new messages.</p>
-            ) : (
-              <ul className="space-y-4 list-none p-0">
-                {userMessages.map((msg) => (
-                  <li
-                    key={msg.messageId}
-                    className={`border rounded p-4 shadow-sm ${
-                      msg.read === false
-                        ? "bg-blue-50 border-blue-300"
-                        : "bg-white border-gray-200"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="font-semibold text-lg">{msg.message}</p>
-                      <span className="text-xs text-gray-500 ml-4 whitespace-nowrap">
-                        {msg.createdAt?.toDate().toLocaleString()}
-                      </span>
-                    </div>
-                    {msg.read === false && (
-                      <span className="inline-block text-xs font-medium text-blue-600">
-                        NEW
-                      </span>
-                    )}
-                    {msg.orderId && (
-                      <p className="text-sm text-gray-600 mt-1">
-                        Related to Order ID: {msg.orderId}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
+        {activeTab === "messages" && <MessageTab userMessages={userMessages} />}
       </main>
     </div>
   );
