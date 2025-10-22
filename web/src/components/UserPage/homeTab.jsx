@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 
+import { Circle, CircleMarker } from "react-leaflet";
+
 function MapSetTo({ position }) {
   const map = useMap();
   useEffect(() => {
@@ -257,7 +259,7 @@ export default function HomeTab({
       </div>
 
       {/* Map */}
-      <div className="w-full rounded overflow-hidden border border-gray-300 mt-4 mb-4">
+      <div className="w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm mt-4 mb-4">
         <div className="h-72 md:h-80 lg:h-96 relative">
           <MapContainer
             center={userLatLng}
@@ -280,6 +282,30 @@ export default function HomeTab({
             <Marker position={userLatLng}>
               <Popup>Your delivery location</Popup>
             </Marker>
+
+            {userLatLng && (
+              <>
+                <Circle
+                  center={userLatLng}
+                  radius={searchRadius * 1000}
+                  pathOptions={{
+                    color: "#3b82f6",
+                    fillColor: "#3b82f6",
+                    fillOpacity: 0.08,
+                  }}
+                  weight={2}
+                />
+                <CircleMarker
+                  center={userLatLng}
+                  radius={5}
+                  pathOptions={{
+                    color: "#2563eb",
+                    fillColor: "#2563eb",
+                    fillOpacity: 1,
+                  }}
+                />
+              </>
+            )}
 
             {filteredRestaurants
               .filter((r) => r?.location?.latitude && r?.location?.longitude)
