@@ -15,8 +15,8 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import Sidebar from "../components/RestaurantPage/sidebar";
-import defaultProfileImg from "../assets/defaultProfile.svg";
-import editIcon from "../assets/edit.svg";
+import OrdersTab from "../components/RestaurantPage/ordersTab";
+import MenuTab from "../components/RestaurantPage/menuTab";
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -230,11 +230,11 @@ export default function RestaurantPage() {
         const orderSnapshot = await getDoc(orderDocRef);
         if (!orderSnapshot.exists()) {
             console.error(`Order ${orderId} not found for auto-rejection.`);
-            return false; // Indicate failure
+            return false;
         }
         
         const orderData = orderSnapshot.data();
-        const userId = orderData.userId; // Extracted the userId!
+        const userId = orderData.userId;
 
         // --- 2. UPDATE the Order Status ---
         await updateDoc(orderDocRef, {
@@ -578,8 +578,6 @@ return (
           </div>
 
           {/* Form to edit restaurant info */}
-          {/* Note: The onSubmit logic and variables (geocodeAddress, GeoPoint, formatHoursForFirestore, etc.)
-                must be defined in the component scope for this to work. */}
           <form
             className="mt-6 space-y-4 max-w-md"
             onSubmit={async (e) => {
@@ -713,451 +711,30 @@ return (
         </>
       )}
 
-      {/* ======================================= */}
       {/* 2. Menu Management Tab (activeTab === "menu") */}
-      {/* ======================================= */}
       {activeTab === "menu" && (
-        <>
-          <h2 className="text-2xl font-semibold mb-4">
-            Menu Management
-          </h2>
-
-          {/* Add new menu item Form */}
-          {/* Note: The state/variables like newMenuItem, setNewMenuItem, db, doc, updateDoc 
-              must be defined in the component scope for this to work. */}
-          <form
-            className="mt-6 space-y-4 bg-gray-50 p-4 rounded shadow max-w-2xl"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!newMenuItem.name || !newMenuItem.price) {
-                alert("Name & price required");
-                return;
-              }
-              const item = {
-                ...newMenuItem,
-                calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
-                price: parseFloat(newMenuItem.price),
-                prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
-              };
-
-              const updatedMenu = [...(restaurantData.menu || []), item];
-
-              const docRef = doc(db, "restaurants", restaurantData.id);
-              try {
-                await updateDoc(docRef, { menu: updatedMenu });
-                setRestaurantData((prev) => ({
-                  ...prev,
-                  menu: updatedMenu,
-                }));
-                setNewMenuItem({
-                  name: "",
-                  description: "",
-                  calories: "",
-                  price: "",
-                  prepTime: "",
-                  imgUrl: "",
-                  available: true,
-                });
-                alert("Menu item added");
-              } catch (err) {
-                console.error("Add menu item error:", err);
-                alert("Failed to add menu item");
-              }
-            }}
-          >
-            <h3 className="text-xl font-semibold border-b pb-2">Add New Menu Item</h3>
-            <input
-              type="text"
-              placeholder="Name"
-              value={newMenuItem.name}
-              onChange={(e) =>
-                setNewMenuItem((prev) => ({ ...prev, name: e.target.value }))
-              }
-              className="w-full border px-3 py-2 rounded"
-              required
-            />
-            <textarea
-              placeholder="Description"
-              value={newMenuItem.description}
-              onChange={(e) =>
-                setNewMenuItem((prev) => ({
-                  ...prev,
-                  description: e.target.value,
-                }))
-              }
-              className="w-full border px-3 py-2 rounded"
-              rows="2"
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <input
-                type="number"
-                placeholder="Calories"
-                value={newMenuItem.calories}
-                onChange={(e) =>
-                  setNewMenuItem((prev) => ({
-                    ...prev,
-                    calories: e.target.value,
-                  }))
-                }
-                className="border px-3 py-2 rounded"
-              />
-              <input
-                type="number"
-                placeholder="Price"
-                step="0.01"
-                value={newMenuItem.price}
-                onChange={(e) =>
-                  setNewMenuItem((prev) => ({
-                    ...prev,
-                    price: e.target.value,
-                  }))
-                }
-                className="border px-3 py-2 rounded"
-                required
-              />
-              <input
-                type="number"
-                placeholder="Prep Time (min)"
-                value={newMenuItem.prepTime}
-                onChange={(e) =>
-                  setNewMenuItem((prev) => ({
-                    ...prev,
-                    prepTime: e.target.value,
-                  }))
-                }
-                className="border px-3 py-2 rounded"
-              />
-              <input
-                type="text"
-                placeholder="Image URL"
-                value={newMenuItem.imgUrl}
-                onChange={(e) =>
-                  setNewMenuItem((prev) => ({ ...prev, imgUrl: e.target.value }))
-                }
-                className="border px-3 py-2 rounded"
-              />
-            </div>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={newMenuItem.available}
-                onChange={(e) =>
-                  setNewMenuItem((prev) => ({
-                    ...prev,
-                    available: e.target.checked,
-                  }))
-                }
-              />
-              <span className="font-medium text-gray-700">Available</span>
-            </label>
-            <button
-              type="submit"
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 w-full font-medium"
-            >
-              Add Item to Menu
-            </button>
-          </form>
-
-          {/* Current Menu Display */}
-          {restaurantData.menu && restaurantData.menu.length > 0 && (
-            <div className="mt-10">
-              <h3 className="text-xl font-semibold mb-4 border-b pb-2">Current Menu Items ({restaurantData.menu.length})</h3>
-              <ul className="space-y-4">
-                {restaurantData.menu.map((item, idx) => (
-                  <li
-                    key={idx}
-                    className="border rounded p-4 flex flex-col sm:flex-row sm:items-start gap-4 bg-white shadow-md hover:shadow-lg transition-shadow"
-                  >
-                    <div className="flex items-start space-x-4 w-full">
-                      {item.imgUrl && (
-                        <img
-                          src={item.imgUrl}
-                          alt={item.name}
-                          style={{ width: "100px", height: "100px", objectFit: "cover" }}
-                          className="rounded flex-shrink-0"
-                        />
-                      )}
-                      <div className="flex-1 space-y-2">
-                        <input
-                          type="text"
-                          value={item.name}
-                          onChange={(e) =>
-                            setRestaurantData((prev) => {
-                              const newMenu = [...prev.menu];
-                              newMenu[idx] = { ...newMenu[idx], name: e.target.value };
-                              return { ...prev, menu: newMenu };
-                            })
-                          }
-                          className="font-semibold w-full border px-2 py-1 rounded"
-                        />
-                        <textarea
-                          value={item.description}
-                          onChange={(e) =>
-                            setRestaurantData((prev) => {
-                              const newMenu = [...prev.menu];
-                              newMenu[idx] = { ...newMenu[idx], description: e.target.value };
-                              return { ...prev, menu: newMenu };
-                            })
-                          }
-                          className="text-sm w-full border px-2 py-1 rounded"
-                          rows="2"
-                        />
-                        <div className="flex gap-2">
-                           <input
-                            type="number"
-                            value={item.calories}
-                            onChange={(e) =>
-                              setRestaurantData((prev) => {
-                                const newMenu = [...prev.menu];
-                                newMenu[idx] = { ...newMenu[idx], calories: e.target.value };
-                                return { ...prev, menu: newMenu };
-                              })
-                            }
-                            placeholder="Calories"
-                            className="text-sm w-full border px-2 py-1 rounded"
-                          />
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.price}
-                            onChange={(e) =>
-                              setRestaurantData((prev) => {
-                                const newMenu = [...prev.menu];
-                                newMenu[idx] = { ...newMenu[idx], price: e.target.value };
-                                return { ...prev, menu: newMenu };
-                              })
-                            }
-                            placeholder="Price"
-                            className="text-sm w-full border px-2 py-1 rounded"
-                          />
-                          <input
-                            type="number"
-                            value={item.prepTime}
-                            onChange={(e) =>
-                              setRestaurantData((prev) => {
-                                const newMenu = [...prev.menu];
-                                newMenu[idx] = { ...newMenu[idx], prepTime: e.target.value };
-                                return { ...prev, menu: newMenu };
-                              })
-                            }
-                            placeholder="Prep Time"
-                            className="text-sm w-full border px-2 py-1 rounded"
-                          />
-                        </div>
-                        <input
-                          type="text"
-                          value={item.imgUrl}
-                          onChange={(e) =>
-                            setRestaurantData((prev) => {
-                              const newMenu = [...prev.menu];
-                              newMenu[idx] = { ...newMenu[idx], imgUrl: e.target.value };
-                              return { ...prev, menu: newMenu };
-                            })
-                          }
-                          placeholder="Image URL"
-                          className="text-sm w-full border px-2 py-1 rounded"
-                        />
-
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={item.available}
-                            onChange={(e) =>
-                              setRestaurantData((prev) => {
-                                const newMenu = [...prev.menu];
-                                newMenu[idx] = {
-                                  ...newMenu[idx],
-                                  available: e.target.checked,
-                                };
-                                return { ...prev, menu: newMenu };
-                              })
-                            }
-                          />
-                          <span className="font-medium text-gray-700">Available</span>
-                        </label>
-
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={() => {
-                              const updatedMenu = restaurantData.menu.map((mi, i) =>
-                                i === idx
-                                  ? {
-                                      ...mi,
-                                      // Convert string values back to numbers for Firestore/state consistency
-                                      calories: mi.calories ? parseInt(mi.calories) : null,
-                                      price: parseFloat(mi.price),
-                                      prepTime: mi.prepTime ? parseInt(mi.prepTime) : null,
-                                    }
-                                  : mi
-                              );
-                              const docRef = doc(db, "restaurants", restaurantData.id);
-                              updateDoc(docRef, { menu: updatedMenu })
-                                .then(() => {
-                                  alert("Menu item updated successfully!");
-                                  // Update the state with the correctly formatted numbers
-                                  setRestaurantData((prev) => ({
-                                    ...prev,
-                                    menu: updatedMenu,
-                                  }));
-                                })
-                                .catch((err) => {
-                                  console.error("Update menu error:", err);
-                                  alert("Failed updating menu");
-                                });
-                            }}
-                            className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition-colors"
-                          >
-                            Update
-                          </button>
-                          <button
-                            onClick={() => {
-                              const updatedMenu = restaurantData.menu.filter(
-                                (_, i) => i !== idx
-                              );
-                              const docRef = doc(db, "restaurants", restaurantData.id);
-                              updateDoc(docRef, { menu: updatedMenu })
-                                .then(() => {
-                                  alert("Deleted menu item");
-                                  setRestaurantData((prev) => ({
-                                    ...prev,
-                                    menu: updatedMenu,
-                                  }));
-                                })
-                                .catch((err) => {
-                                  console.error("Delete menu error:", err);
-                                  alert("Failed deleting menu item");
-                                });
-                            }}
-                            className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </>
+        <MenuTab 
+          restaurantData={restaurantData} 
+          setRestaurantData={setRestaurantData} 
+          db={db}
+          doc={doc}
+          updateDoc={updateDoc}
+        />
       )}
 
-      {/* ======================================= */}
-      {/* 3. Order Management Tab (activeTab === "orders") */}
-      {/* ======================================= */}
-      {activeTab === "orders" && (
-        <>
-          <h2 className="text-2xl font-semibold mb-4">
-            Order Management ({unhandledOrders.length} New)
-          </h2>
-
-          <div className="mt-10">
-            <h3 className="text-xl font-semibold mb-4 border-b pb-2">New Orders Awaiting Confirmation</h3>
-            {/* Note: loadingOrders, unhandledOrders, handleConfirmOrder, and handleRejectOrder must be available in scope */}
-            {loadingOrders ? (
-              <p>Loading orders…</p>
-            ) : unhandledOrders.length === 0 ? (
-              <p className="text-gray-500">No new orders awaiting confirmation. 🥳</p>
-            ) : (
-              <div className="space-y-4">
-                {unhandledOrders.map((order) => (
-                  <div
-                    key={order.orderId}
-                    className="border-2 border-red-300 rounded p-4 bg-white shadow-lg"
-                  >
-                    <p className="text-sm text-gray-600">
-                      <strong>Order ID:</strong> {order.orderId}
-                    </p>
-                    <p>
-                      <strong>Status:</strong> <span className="font-medium text-red-600">{order.deliveryStatus}</span>
-                    </p>
-                    <p className="mb-2">
-                      <strong>Order Placed:</strong>{" "}
-                      {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleString() : 'N/A'}
-                    </p>
-                    
-                    <h4 className="font-semibold mt-3">Items:</h4>
-                    <ul className="ml-4 list-disc text-sm">
-                      {order.items?.map((item, i) => (
-                        <li key={i} className="py-0.5">
-                          {item.name} × **{item.quantity}** (Prep: {item.prepTime} min)
-                        </li>
-                      ))}
-                    </ul>
-
-                    {/* Conditional Buttons: ONLY show for unhandled orders (null or undefined) */}
-                    {order.orderConfirmed == null && (
-                      <div className="mt-4 flex space-x-3">
-                        <button
-                          onClick={() => handleConfirmOrder(order.orderId)}
-                          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium transition-colors"
-                        >
-                          ✅ Accept Order
-                        </button>
-                        <button
-                          onClick={() => handleRejectOrder(order.orderId)}
-                          className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium transition-colors"
-                        >
-                          ❌ Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <hr className="my-8 border-t-2 border-gray-300" />
           
-          <div className="mt-10">
-            <h3 className="text-xl font-semibold mb-4 border-b pb-2">Orders Awaiting Pickup</h3>
-            {/* Note: confirmedOrders should also be available in scope */}
-            {loadingOrders ? (
-              <p>Loading orders…</p>
-            ) : confirmedOrders.length === 0 ? (
-              <p className="text-gray-500">No orders currently awaiting pickup.</p>
-            ) : (
-              <div className="space-y-4">
-                {confirmedOrders.map((order) => (
-                  <div
-                    key={order.orderId}
-                    className="border-2 border-green-500 rounded p-4 bg-green-50 shadow-md"
-                  >
-                    <p className="text-sm text-gray-600">
-                      <strong>Order ID:</strong> {order.orderId}
-                    </p>
-                    <p>
-                      <strong>Status:</strong> <span className="font-medium text-green-700">{order.deliveryStatus}</span>
-                    </p>
-                    <p>
-                      <strong>Courier ID:</strong> {order.courierId || 'Awaiting Courier'}
-                    </p>
-                    <p className="mb-2">
-                      <strong>Estimated Ready:</strong>{" "}
-                      {order.estimatedReadyTime?.toDate().toLocaleString()}
-                    </p>
-                    
-                    <h4 className="font-semibold mt-3">Items:</h4>
-                    <ul className="ml-4 list-disc text-sm">
-                      {order.items?.map((item, i) => (
-                        <li key={i} className="py-0.5">
-                          {item.name} × **{item.quantity}** (Prep: {item.prepTime} min)
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
+      {/* 3. Order Management Tab (activeTab === "orders") */}
+      {activeTab === "orders" && (
+          <OrdersTab // <-- RENDER THE NEW COMPONENT
+              loadingOrders={loadingOrders}
+              unhandledOrders={unhandledOrders}
+              confirmedOrders={confirmedOrders}
+              handleConfirmOrder={handleConfirmOrder}
+              handleRejectOrder={handleRejectOrder}
+          />
       )}
 
-      {/* ======================================= */}
       {/* 4. Settings Tab (activeTab === "settings") */}
-      {/* ======================================= */}
       {activeTab === "settings" && (
         <>
           <h2 className="text-2xl font-semibold mb-4">
@@ -1172,6 +749,8 @@ return (
   </div>
 );
 }
+
+
 /*
 **** The accepted orders under heading "Orders awaiting pickup"
        * button "Pick-up completed" pressed -> deliveryStatus: "order being delivered" (hypothetical: on courier arrival, courierId match)
