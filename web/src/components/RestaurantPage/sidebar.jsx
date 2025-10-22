@@ -1,29 +1,55 @@
 import homeIcon from "../../assets/home.svg";
-import messagesIcon from "../../assets/messages.svg";
 import menuIcon from "../../assets/menu.svg";
 import settingsIcon from "../../assets/settings.svg";
 import ordersIcon from "../../assets/orders.svg";
 
-function NavButton({ active, onClick, iconSrc, children, ariaLabel }) {
+function NavButton({ active, onClick, iconSrc, children, ariaLabel, newOrderCount = 0 }) {
+    const showBadge = newOrderCount > 0;
+    
+    const badgeSizeClasses = 
+        newOrderCount < 10 
+            ? 'w-5'
+            : 'px-2';
+
     return (
         <button
             onClick={onClick}
             aria-current={active ? "page" : undefined}
             aria-label={ariaLabel}
-            className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
+            className={`flex items-center justify-between text-left px-3 py-2 rounded-md cursor-pointer transition-all
             ${
                 active
                     ? "bg-blue-600 text-white"
                     : "hover:bg-gray-100 text-gray-800"
             }`}
         >
-            <img
-                src={iconSrc}
-                className="w-5 h-5 object-contain"
-                alt=""
-                aria-hidden="true"
-            />
-            {children}
+            <div className="flex items-center gap-2">
+                <img
+                    src={iconSrc}
+                    className="w-5 h-5 object-contain"
+                    alt=""
+                    aria-hidden="true"
+                />
+                {children}
+            </div>
+
+            {showBadge && (
+                <span 
+                    className={`
+                        // Badge styles
+                        bg-red-600 text-white text-xs font-bold rounded-full 
+                        
+                        // Sizing and centering
+                        h-5 flex items-center justify-center 
+                        ${badgeSizeClasses} 
+                        text-center
+                        flex-shrink-0 // Crucial: Prevents the badge from shrinking when space is tight
+                    `}
+                    aria-label={`${newOrderCount} new orders pending`} 
+                >
+                    {newOrderCount > 99 ? '99+' : newOrderCount} 
+                </span>
+            )}
         </button>
     );
 }
@@ -31,6 +57,7 @@ function NavButton({ active, onClick, iconSrc, children, ariaLabel }) {
 export default function Sidebar({
     activeTab,
     setActiveTab,
+    newOrderCount, 
 }) {
     return (
         <aside
@@ -63,6 +90,8 @@ export default function Sidebar({
                     onClick={() => setActiveTab("orders")} 
                     iconSrc={ordersIcon} 
                     ariaLabel="View and Manage Orders"
+                    // Pass the count prop to the Orders button
+                    newOrderCount={newOrderCount} 
                 > 
                     Orders 
                 </NavButton>

@@ -522,10 +522,12 @@ export default function RestaurantPage() {
   
   const unhandledOrders = orders.filter(order => order.orderConfirmed == null || order.orderConfirmed === false);
   const confirmedOrders = orders.filter(order => order.orderConfirmed === true);
+  const pendingCount = unhandledOrders.length;
+
 
 return (
   <div className="flex min-h-screen">
-    <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+    <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} newOrderCount={pendingCount}/>
 
     <div className="flex-grow p-6">
       <h1 className="text-3xl font-bold mb-6">
@@ -535,11 +537,7 @@ return (
         Welcome, {user.displayName || user.email} (Restaurant Manager)
       </h2>
 
-      {/* 🔥 CONDITIONAL RENDERING based on activeTab */}
-
-      {/* ======================================= */}
       {/* 1. Restaurant Info Tab (activeTab === "info") */}
-      {/* ======================================= */}
       {activeTab === "info" && (
         <>
           <h2 className="text-2xl font-semibold mb-4">
