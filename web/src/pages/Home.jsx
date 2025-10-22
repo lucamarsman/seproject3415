@@ -19,7 +19,6 @@ export default function Home() {
         navigate(`/browseRestaurants?type=${encodeURIComponent(type)}`);
     };
 
-    // 🔥 MODIFIED useEffect to fetch both restaurant types and the icon lookup table
     useEffect(() => {
         const fetchRequiredData = async () => {
             setLoading(true);
@@ -90,7 +89,6 @@ export default function Home() {
                             className="restaurant-card"
                             onClick={() => handleTypeClick(type)} 
                         >
-                            {/* 🔥 Display the icon next to the type name */}
                             <span className="type-icon">{getIconForType(type)}</span>
                             {type}
                         </button>

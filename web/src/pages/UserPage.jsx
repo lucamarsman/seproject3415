@@ -86,7 +86,7 @@ function isRestaurantOpenToday(hoursArray, now = new Date()) {
     !Closing ||
     Opening.length !== 4 ||
     Closing.length !== 4 ||
-    Opening === Closing // ðŸ”’ Same open/close time â†’ closed
+    Opening === Closing
   ) {
     return false;
   }
@@ -239,8 +239,7 @@ export default function UserPage() {
         const snap = await getDocs(collection(db, "restaurants"));
         const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        setAllRestaurants([...fetched, ...dummyRestaurants]); //all restaurants on initial fetch appear on map - includes dummy restaurants to test UI/UX
-        // only those restaurants user toggles with +/- appear on list (filtered by distance)
+        setAllRestaurants([...fetched, ...dummyRestaurants]);
       } catch (err) {
         console.error("Error fetching restaurants:", err);
       }
@@ -407,7 +406,7 @@ export default function UserPage() {
   useEffect(() => {
     const container = document.getElementById("scrollable-panel");
     if (container) {
-      container.scrollTo({ top: 0, behavior: "auto" }); // instant
+      container.scrollTo({ top: 0, behavior: "auto" });
     } else {
       window.scrollTo({ top: 0, behavior: "auto" });
     }

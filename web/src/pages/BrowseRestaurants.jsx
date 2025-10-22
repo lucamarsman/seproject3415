@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
-// Removed 'orderBy' from imports as we are sorting client-side
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import "../BrowseRestaurants.css";
+import "./BrowseRestaurants.css";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function BrowseRestaurants() {
@@ -18,7 +17,7 @@ export default function BrowseRestaurants() {
     ? `🍴 Restaurants: ${filterType}` 
     : "🍴 Browse All Restaurants";
 
-  // Fetch restaurants from Firestore
+  // fetch restaurants from database
   useEffect(() => {
     const fetchRestaurants = async () => {
       setLoading(true);
@@ -27,13 +26,10 @@ export default function BrowseRestaurants() {
       try {
         const restaurantsRef = collection(db, "restaurants");
         let q = restaurantsRef;
-
-        // Apply 'where' clause only if filterType exists (Server-side filter)
         if (filterType) {
           q = query(restaurantsRef, where("type", "==", filterType));
         }
         
-        // Execute the query (filtered or unfiltered, but NOT ordered by Firestore)
         const snap = await getDocs(q);
         
         let fetchedRestaurants = snap.docs.map((d) => ({ 
@@ -41,14 +37,13 @@ export default function BrowseRestaurants() {
           ...d.data() 
         }));
 
-        // 🔥 CLIENT-SIDE SORTING: Order the fetched array alphabetically by storeName
         fetchedRestaurants.sort((a, b) => {
           const nameA = a.storeName ? a.storeName.toUpperCase() : '';
           const nameB = b.storeName ? b.storeName.toUpperCase() : '';
           
           if (nameA < nameB) return -1;
           if (nameA > nameB) return 1;
-          return 0; // names must be equal
+          return 0;
         });
 
         setRestaurants(fetchedRestaurants);
@@ -61,9 +56,8 @@ export default function BrowseRestaurants() {
     };
     
     fetchRestaurants();
-  }, [filterType]); // Fetch data again when filterType changes
+  }, [filterType]);
 
-  // 🧭 Navigation is correct for your routing setup: /browseRestaurants/:id/menu
   const handleCheckMenu = (id) => {
     navigate(`/browseRestaurants/${id}/menu`);
   };
