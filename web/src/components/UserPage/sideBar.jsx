@@ -40,16 +40,15 @@ export default function Sidebar({
     toggleType,
     clearTypes,
 }) {
-    // STATE: To hold the fetched cuisine buttons
+    // variable for cuisine buttons
     const [cuisineBtns, setCuisineBtns] = useState([]);
     const [loadingCuisines, setLoadingCuisines] = useState(true);
 
-    // EFFECT: Fetch the cuisine data from Firestore
+    // fetches the cuisine data from firestore
     useEffect(() => {
         const fetchCuisineIcons = async () => {
             setLoadingCuisines(true);
             try {
-                // Path: collection systemFiles / document systemVariables
                 const docRef = doc(db, "systemFiles", "systemVariables");
                 const docSnap = await getDoc(docRef);
 
@@ -72,7 +71,6 @@ export default function Sidebar({
                 setLoadingCuisines(false);
             }
         };
-
         fetchCuisineIcons();
     }, []); 
 
@@ -88,24 +86,18 @@ export default function Sidebar({
                 <NavButton active={activeTab === "orders"} onClick={() => setActiveTab("orders")} iconSrc={ordersIcon} ariaLabel="Go to Orders tab"> My Orders </NavButton>
 
                 <hr className="my-1 border-gray-300" />
-
-                {/* Cuisine Filter Buttons */}
                 <div className="mt-3">
                     {loadingCuisines ? (
                         <p className="text-sm text-gray-500">Loading filters...</p>
                     ) : (
                         <div className="flex flex-col items-center space-y-3">
-                            {/* 🔥 MODIFIED MAP: Destructuring 'icon' and 'type' directly. 
-                                   'type' is used for the filter value and the display label. */}
                             {cuisineBtns.map(({ icon, type }) => {
                                 const active = filters.types.includes(type);
                                 return (
                                     <button
-                                        // key should be the unique type string
                                         key={type} 
                                         type="button"
                                         onClick={() => {
-                                            // 'type' is used for the filter toggle
                                             toggleType(type); 
                                             setActiveTab("home");
                                         }}
@@ -120,7 +112,6 @@ export default function Sidebar({
                                         <span className="inline-flex items-center justify-center w-8 h-8 mr-3 text-2xl">
                                             {icon}
                                         </span>
-                                        {/* Since 'type' is the human-readable string (e.g., "Pizza"), use it as the label */}
                                         <span>{type}</span> 
                                     </button>
                                 );
