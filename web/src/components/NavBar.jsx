@@ -7,8 +7,9 @@ import "../index.css";
 
 export default function NavBar({ onSelectRole }) {
   const [user, setUser] = useState(null);
-  const [roleMenuOpen, setRoleMenuOpen] = useState(false);     // guest menu
-  const [acctMenuOpen, setAcctMenuOpen] = useState(false);     // signed-in menu
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const [acctMenuOpen, setAcctMenuOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState(() => localStorage.getItem("selectedRole"));
   const roleMenuRef = useRef(null);
   const acctMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -24,8 +25,8 @@ export default function NavBar({ onSelectRole }) {
     return () => unsub();
   }, []);
 
-  // close on outside click
   useEffect(() => {
+    // Close menus on outside click or Escape key
     function onDocClick(e) {
       if (roleMenuRef.current && !roleMenuRef.current.contains(e.target)) {
         setRoleMenuOpen(false);
@@ -34,12 +35,14 @@ export default function NavBar({ onSelectRole }) {
         setAcctMenuOpen(false);
       }
     }
+
     function onEsc(e) {
       if (e.key === "Escape") {
         setRoleMenuOpen(false);
         setAcctMenuOpen(false);
       }
     }
+
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
     return () => {
@@ -47,6 +50,12 @@ export default function NavBar({ onSelectRole }) {
       document.removeEventListener("keydown", onEsc);
     };
   }, []);
+
+  useEffect(() => {
+    // When user signs in, update selected role from localStorage
+    const role = localStorage.getItem("selectedRole");
+    if (role) setSelectedRole(role);
+  }, [user]);
 
   const handleLogout = async () => {
     try {
@@ -60,6 +69,8 @@ export default function NavBar({ onSelectRole }) {
   };
 
   const handleRoleClick = (value) => {
+    localStorage.setItem("selectedRole", value);
+    setSelectedRole(value);
     onSelectRole?.(value);
     setRoleMenuOpen(false);
     navigate("/login");
@@ -75,14 +86,12 @@ export default function NavBar({ onSelectRole }) {
   return (
     <header className="app-header" role="banner">
       <div className="header-inner">
-        {/* Left: Logo (click to home) */}
+        {/* Left: Logo */}
         <div className="header-left">
           <Link to="/" className="logo-link" aria-label="Go to Home">
             <Logo width={120} />
           </Link>
         </div>
-
-        {/* Center: (optional) page title or address chip could go here */}
 
         {/* Right: Auth / Account */}
         <div className="header-right">
@@ -103,16 +112,33 @@ export default function NavBar({ onSelectRole }) {
 
               {acctMenuOpen && (
                 <ul className="menu" role="menu">
-                  <li role="menuitem">
-                    <Link to="/orders" onClick={() => setAcctMenuOpen(false)}>
-                      My Orders
-                    </Link>
-                  </li>
-                  <li role="menuitem">
-                    <Link to="/restaurant" onClick={() => setAcctMenuOpen(false)}>
-                      Restaurant Dashboard
-                    </Link>
-                  </li>
+                  {/* Role-Based Menu Rendering */}
+                  {selectedRole === "user" && (
+                    <>
+                      <li role="menuitem">
+                        <Link to="/user" onClick={() => setAcctMenuOpen(false)}>
+                          User Profile
+                        </Link>
+                      </li>
+                    </>
+                  )}
+
+                  {selectedRole === "restaurant" && (
+                    <li role="menuitem">
+                      <Link to="/restaurant" onClick={() => setAcctMenuOpen(false)}>
+                        Manager Profile
+                      </Link>
+                    </li>
+                  )}
+
+                  {selectedRole === "courier" && (
+                    <li role="menuitem">
+                      <Link to="/courier" onClick={() => setAcctMenuOpen(false)}>
+                        Courier Profile
+                      </Link>
+                    </li>
+                  )}
+
                   <li className="menu-sep" aria-hidden="true" />
                   <li role="menuitem">
                     <button className="menu-danger" onClick={handleLogout}>
