@@ -1,20 +1,19 @@
 import React, { useEffect, useState } from "react";
+// Removed 'orderBy' from imports as we are sorting client-side
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import "../BrowseRestaurants.css";
-import { useNavigate, useSearchParams } from "react-router-dom"; // 🔥 ADDED useSearchParams
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function BrowseRestaurants() {
   const navigate = useNavigate();
-  // 🔥 Read the URL query parameters
   const [searchParams] = useSearchParams();
-  const filterType = searchParams.get('type'); // Gets the value of ?type=...
+  const filterType = searchParams.get('type'); 
 
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Set the title based on whether a filter is active
   const pageTitle = filterType 
     ? `🍴 Restaurants: ${filterType}` 
     : "🍴 Browse All Restaurants";
@@ -29,18 +28,28 @@ export default function BrowseRestaurants() {
         const restaurantsRef = collection(db, "restaurants");
         let q = restaurantsRef;
 
-        // 🔥 CONDITIONAL FILTERING: Apply 'where' clause if filterType exists
+        // Apply 'where' clause only if filterType exists (Server-side filter)
         if (filterType) {
-          // Create a Firestore query to filter by the 'type' field
           q = query(restaurantsRef, where("type", "==", filterType));
         }
         
-        const snap = await getDocs(q); // Execute the query (filtered or unfiltered)
+        // Execute the query (filtered or unfiltered, but NOT ordered by Firestore)
+        const snap = await getDocs(q);
         
-        const fetchedRestaurants = snap.docs.map((d) => ({ 
+        let fetchedRestaurants = snap.docs.map((d) => ({ 
           id: d.id, 
           ...d.data() 
         }));
+
+        // 🔥 CLIENT-SIDE SORTING: Order the fetched array alphabetically by storeName
+        fetchedRestaurants.sort((a, b) => {
+          const nameA = a.storeName ? a.storeName.toUpperCase() : '';
+          const nameB = b.storeName ? b.storeName.toUpperCase() : '';
+          
+          if (nameA < nameB) return -1;
+          if (nameA > nameB) return 1;
+          return 0; // names must be equal
+        });
 
         setRestaurants(fetchedRestaurants);
         setLoading(false);
@@ -51,9 +60,8 @@ export default function BrowseRestaurants() {
       }
     };
     
-    // 🔥 Dependency array now includes filterType, so the fetch reruns when the type changes
     fetchRestaurants();
-  }, [filterType]); 
+  }, [filterType]); // Fetch data again when filterType changes
 
   // 🧭 Navigation is correct for your routing setup: /browseRestaurants/:id/menu
   const handleCheckMenu = (id) => {
@@ -68,7 +76,6 @@ export default function BrowseRestaurants() {
     return <div className="restaurants-page error-message">Error: {error}</div>;
   }
   
-  // Show a message if no restaurants are found, mentioning the filter if active
   if (restaurants.length === 0) {
     return (
       <div className="restaurants-page">
@@ -86,6 +93,7 @@ export default function BrowseRestaurants() {
             {r.imageUrl && <img src={r.imageUrl} alt={r.storeName} className="restaurant-image" />}
             <div className="restaurant-info">
               <h3>{r.storeName}</h3>
+              <p>{r.address}</p>
               <p>{r.type || "General Cuisine"}</p>
               <p className="rating">⭐ {r.rating || "N/A"} / 5</p>
               <button

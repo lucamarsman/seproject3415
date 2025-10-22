@@ -92,6 +92,10 @@ export default function RestaurantPage() {
   // For orders
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  // Dropdown options
+  const [cuisineTypes, setCuisineTypes] = useState([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
+  const [selectedType, setSelectedType] = useState(""); // Tracks the current dropdown value
 
   // Auth listener
   useEffect(() => {
@@ -102,13 +106,47 @@ export default function RestaurantPage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+      const fetchCuisineTypes = async () => {
+          setLoadingTypes(true);
+          try {
+              const docRef = doc(db, "systemFiles", "systemVariables");
+              const docSnap = await getDoc(docRef);
+
+              if (docSnap.exists() && Array.isArray(docSnap.data().typeIcons)) {
+                  // Map the array to just the 'type' string (e.g., ["Pizza", "Sushi"])
+                  const types = docSnap.data().typeIcons
+                      .map(item => item.type)
+                      .filter(type => type);
+
+                  setCuisineTypes(types);
+              } else {
+                  console.warn("Cuisine types array not found or is invalid.");
+              }
+          } catch (error) {
+              console.error("Error fetching cuisine types for dropdown:", error);
+          } finally {
+              setLoadingTypes(false);
+          }
+      };
+
+      fetchCuisineTypes();
+  }, []); // Runs once on mount
+
   // Once restaurantData is loaded, parse hours
   useEffect(() => {
-    if (restaurantData?.hours) {
-      const parsed = parseHoursArray(restaurantData.hours);
-      setHoursState(parsed);
+    if (!restaurantData) return;
+    if (restaurantData.hours) {
+        const parsed = parseHoursArray(restaurantData.hours);
+        setHoursState(parsed);
     }
-  }, [restaurantData]);
+    //parse type
+    if (restaurantData.type) {
+        setSelectedType(restaurantData.type);
+    } else if (cuisineTypes.length > 0) {
+        setSelectedType(cuisineTypes[0]);
+    }
+}, [restaurantData, cuisineTypes]);
 
   // Fetch or create restaurant based on logged-in user
   useEffect(() => {
@@ -526,7 +564,7 @@ export default function RestaurantPage() {
           const storeName = form.storeName.value.trim();
           const address = form.address.value.trim();
           const phone = form.phone.value.trim();
-          const type = form.type.value.trim();
+          const type = selectedType;
 
           if (!phoneRegex.test(phone)) {
             alert("Please enter a valid phone number (e.g. 123‑456‑7890)");
@@ -588,11 +626,25 @@ export default function RestaurantPage() {
         </div>
         <div>
           <label>Type</label>
-          <input
-            name="type"
-            defaultValue={restaurantData.type || ""}
-            className="w-full border px-2 py-1 rounded"
-          />
+          {loadingTypes ? (
+              <p className="text-sm text-gray-500">Loading cuisine types...</p>
+          ) : (
+              <select
+                  name="type"
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  required
+                  className="w-full border px-2 py-1 rounded bg-white"
+                  disabled={cuisineTypes.length === 0}
+              >
+                  <option value="" disabled>Select a cuisine type</option>
+                  {cuisineTypes.map((typeOption) => (
+                      <option key={typeOption} value={typeOption}>
+                          {typeOption}
+                      </option>
+                  ))}
+              </select>
+            )}
         </div>
         <div className="mt-4">
           <h3 className="font-semibold">Working Hours</h3>
