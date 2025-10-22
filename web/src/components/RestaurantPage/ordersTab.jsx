@@ -12,7 +12,7 @@ export default function OrdersTab({loadingOrders, unhandledOrders, confirmedOrde
                 {loadingOrders ? (
                     <p>Loading orders…</p>
                 ) : unhandledOrders.length === 0 ? (
-                    <p className="text-gray-500">No new orders awaiting confirmation. 🥳</p>
+                    <p className="text-gray-500">No new orders awaiting confirmation.</p>
                 ) : (
                     <div className="space-y-4">
                         {unhandledOrders.map((order) => (

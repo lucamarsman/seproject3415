@@ -4,6 +4,10 @@ import { doc, getDoc, setDoc, updateDoc, GeoPoint, Timestamp, increment } from "
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 
+import defaultImage from "../assets/defaultImgUrl.png";
+const DEFAULT_IMAGE_URL = defaultImage;
+
+
 export default function OrderPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -223,14 +227,17 @@ export default function OrderPage() {
 
               return (
                 <li key={index} className="border rounded p-4 flex gap-4 items-start shadow-sm">
-                  {item.imgUrl && (
-                    <img
-                      src={item.imgUrl}
-                      alt={item.name}
-                      style={{ width: "100px", height: "100px", objectFit: "cover" }}
-                      className="rounded"
-                    />
-                  )}
+                  <img
+                    src={item.imgUrl || DEFAULT_IMAGE_URL} 
+                    alt={item.name}
+                    style={{ width: "100px", height: "100px", objectFit: "cover" }}
+                    className="rounded"
+                    onError={(e) => {
+                      if (e.currentTarget.src !== DEFAULT_IMAGE_URL) {
+                        e.currentTarget.src = DEFAULT_IMAGE_URL;
+                      }
+                    }}
+                  />
                   <div className="flex-1">
                     <h3 className="font-semibold">{item.name}</h3>
                     <p className="text-sm text-gray-600">{item.description}</p>

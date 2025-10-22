@@ -1,18 +1,22 @@
 import React from "react";
 import "./MenuItemCard.css";
 
-//returns Firestore Database items
+import defaultImage from "../assets/defaultImgUrl.png";
+const DEFAULT_IMAGE_URL = defaultImage;
+
+// returns Firestore Database items
 export default function MenuItemCard({ item, onAddToCart }) {
   return (
     <div className={`menu-item-card ${item.popular ? "popular" : ""}`}>
       <img
-        src={item.imgUrl} 
+        src={item.imgUrl || DEFAULT_IMAGE_URL} 
         alt={item.name}
         className="menu-item-image"
-        onError={(e) =>
-          (e.target.src =
-            "https://via.placeholder.com/120x100.png?text=No+Image")
-        }
+        onError={(e) => {
+          if (e.currentTarget.src !== DEFAULT_IMAGE_URL) {
+            e.currentTarget.src = DEFAULT_IMAGE_URL;
+          }
+        }}
       />
       <div className="menu-item-details">
         <h3>{item.name}</h3>

@@ -4,11 +4,10 @@ import defaultImage from "../../assets/defaultImgUrl.png";
 const DEFAULT_IMAGE_URL = defaultImage;
 
 const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
-  // State for the new menu item form inputs
   const [newMenuItem, setNewMenuItem] = useState({
     name: "",
     description: "",
-    calories: "", // Storing as string initially for input field value
+    calories: "",
     price: "",
     prepTime: "",
     imgUrl: "",
