@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 
+import defaultImage from "../../assets/defaultImgUrl.png";
+const DEFAULT_IMAGE_URL = defaultImage;
+
 const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
   // State for the new menu item form inputs
   const [newMenuItem, setNewMenuItem] = useState({
@@ -15,18 +18,23 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
   // Handler to add a new menu item
   const handleAddItem = async (e) => {
     e.preventDefault();
-    if (!newMenuItem.name || !newMenuItem.price) {
-      alert("Name & price required");
+    if (!newMenuItem.name || !newMenuItem.price || !newMenuItem.prepTime) {
+      alert("Name, price, & prep time required");
       return;
     }
 
+    const finalImgUrl = newMenuItem.imgUrl.trim() === "" 
+    ? DEFAULT_IMAGE_URL 
+    : newMenuItem.imgUrl;
+
     // Prepare the item for Firestore: parse number strings to actual numbers
     const item = {
-      ...newMenuItem,
-      calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
-      price: parseFloat(newMenuItem.price),
-      prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
-    };
+    ...newMenuItem,
+    imgUrl: finalImgUrl, 
+    calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
+    price: parseFloat(newMenuItem.price),
+    prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
+  };
 
     const updatedMenu = [...(restaurantData.menu || []), item];
 
