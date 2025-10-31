@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
+import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
 import MenuTab from "../components/RestaurantPage/menuTab";
 
 // ADDRESS to GEOLOCATION: OpenCage API
@@ -520,10 +521,10 @@ export default function RestaurantPage() {
       </div>
     );
   
-  const unhandledOrders = orders.filter(order => order.orderConfirmed == null || order.orderConfirmed === false);
+  const unhandledOrders = orders.filter(order => order.orderConfirmed == null);
+  const rejectedOrders = orders.filter(order => order.orderConfirmed === false);
   const confirmedOrders = orders.filter(order => order.orderConfirmed === true);
   const pendingCount = unhandledOrders.length;
-
 
 return (
   <div className="flex min-h-screen">
@@ -731,8 +732,20 @@ return (
               handleRejectOrder={handleRejectOrder}
           />
       )}
+      {/* 4. Order History Tab (activeTab === "orderHistory") 
+      This is where all orders that have completed the cycle go:
+      A. Rejected by Timeout
+      B. Rejected by Restaurant Managed
+      C. Courier picked-up
+      */}
+      {activeTab === "orderHistory" && (
+        <OrderHistoryTab
+          loadingOrders={loadingOrders}
+          allOrders={orders}
+        />
+      )}
 
-      {/* 4. Settings Tab (activeTab === "settings") */}
+      {/* 5. Settings Tab (activeTab === "settings") */}
       {activeTab === "settings" && (
         <>
           <h2 className="text-2xl font-semibold mb-4">

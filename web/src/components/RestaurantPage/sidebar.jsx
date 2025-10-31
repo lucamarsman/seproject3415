@@ -1,6 +1,7 @@
 import homeIcon from "../../assets/home.svg";
 import menuIcon from "../../assets/menu.svg";
 import settingsIcon from "../../assets/settings.svg";
+import receiptIcon from "../../assets/receipt.svg";
 import ordersIcon from "../../assets/orders.svg";
 
 function NavButton({ active, onClick, iconSrc, children, ariaLabel, newOrderCount = 0 }) {
@@ -90,10 +91,18 @@ export default function Sidebar({
                     onClick={() => setActiveTab("orders")} 
                     iconSrc={ordersIcon} 
                     ariaLabel="View and Manage Orders"
-                    // Pass the count prop to the Orders button
                     newOrderCount={newOrderCount} 
                 > 
                     Orders 
+                </NavButton>
+
+                <NavButton 
+                    active={activeTab === "orderHistory"} 
+                    onClick={() => setActiveTab("orderHistory")} 
+                    iconSrc={receiptIcon} 
+                    ariaLabel="Order History"
+                > 
+                    Order History 
                 </NavButton>
                 
                 <NavButton 
