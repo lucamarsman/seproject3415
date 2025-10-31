@@ -22,9 +22,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
       return;
     }
 
-    const finalImgUrl = newMenuItem.imgUrl.trim() === "" 
-    ? DEFAULT_IMAGE_URL 
-    : newMenuItem.imgUrl;
+    const finalImgUrl = newMenuItem.imgUrl.trim();
 
     // Prepare the item for Firestore: parse number strings to actual numbers
     const item = {
@@ -241,18 +239,16 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
                 className="border rounded p-4 flex flex-col sm:flex-row sm:items-start gap-4 bg-white shadow-md hover:shadow-lg transition-shadow"
               >
                 <div className="flex items-start space-x-4 w-full">
-                  {item.imgUrl && (
-                    <img
-                      src={item.imgUrl}
-                      alt={item.name}
-                      style={{
-                        width: "100px",
-                        height: "100px",
-                        objectFit: "cover",
-                      }}
-                      className="rounded flex-shrink-0"
-                    />
-                  )}
+                  <img
+                    src={item.imgUrl && item.imgUrl.trim() !== "" ? item.imgUrl : DEFAULT_IMAGE_URL}
+                    alt={item.name}
+                    style={{
+                      width: "100px",
+                      height: "100px",
+                      objectFit: "cover",
+                    }}
+                    className="rounded flex-shrink-0"
+                  />
                   <div className="flex-1 space-y-2">
                     <input
                       type="text"
