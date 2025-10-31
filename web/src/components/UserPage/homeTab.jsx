@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 
 import { Circle, CircleMarker } from "react-leaflet";
+import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 
 function MapSetTo({ position }) {
   const map = useMap();
@@ -69,47 +70,6 @@ function formatTime(timeStr) {
   const hours = timeStr.slice(0, 2);
   const minutes = timeStr.slice(2);
   return `${hours}:${minutes}`;
-}
-
-function isRestaurantOpenToday(hoursArray, now = new Date()) {
-  const days = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-  ];
-  const today = days[now.getDay()];
-  const todayEntry = hoursArray?.find((entry) => entry[today]);
-  if (!todayEntry || !todayEntry[today]) return false;
-  const { Opening, Closing } = todayEntry[today];
-  if (
-    !Opening ||
-    !Closing ||
-    Opening.length !== 4 ||
-    Closing.length !== 4 ||
-    Opening === Closing
-  )
-    return false;
-
-  const openHour = parseInt(Opening.slice(0, 2), 10);
-  const openMinute = parseInt(Opening.slice(2), 10);
-  const closeHour = parseInt(Closing.slice(0, 2), 10);
-  const closeMinute = parseInt(Closing.slice(2), 10);
-
-  const openTime = new Date(now);
-  openTime.setHours(openHour, openMinute, 0, 0);
-  const closeTime = new Date(now);
-  closeTime.setHours(closeHour, closeMinute, 0, 0);
-
-  if (closeTime <= openTime) {
-    const closeTimeNextDay = new Date(closeTime);
-    closeTimeNextDay.setDate(closeTimeNextDay.getDate() + 1);
-    return now >= openTime || now <= closeTimeNextDay;
-  }
-  return now >= openTime && now <= closeTime;
 }
 
 // Leaflet default icon fix + custom restaurant icon

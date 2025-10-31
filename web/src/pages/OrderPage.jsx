@@ -3,6 +3,7 @@ import { onAuthStateChanged, getAuth } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, GeoPoint, Timestamp, increment } from "firebase/firestore";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
+import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
 
 import defaultImage from "../assets/defaultImgUrl.png";
 const DEFAULT_IMAGE_URL = defaultImage;
@@ -111,6 +112,11 @@ export default function OrderPage() {
   };
 
   const handleSubmitOrder = async () => {
+    if (!isRestaurantOpenToday(restaurant.hours, new Date())) {
+      alert("Store is currently closed. Please try during open hours.");
+      return;
+    }
+
     if (total === 0) {
       alert("Please add at least one item to your order.");
       return;
