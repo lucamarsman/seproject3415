@@ -99,15 +99,6 @@ export default function Sidebar({
           Messages{" "}
         </NavButton>
         <NavButton
-          active={activeTab === "settings"}
-          onClick={() => setActiveTab("settings")}
-          iconSrc={settingsIcon}
-          ariaLabel="Go to Settings tab"
-        >
-          {" "}
-          Settings{" "}
-        </NavButton>
-        <NavButton
           active={activeTab === "orders"}
           onClick={() => setActiveTab("orders")}
           iconSrc={ordersIcon}
@@ -115,6 +106,15 @@ export default function Sidebar({
         >
           {" "}
           My Orders{" "}
+        </NavButton>
+        <NavButton
+          active={activeTab === "settings"}
+          onClick={() => setActiveTab("settings")}
+          iconSrc={settingsIcon}
+          ariaLabel="Go to Settings tab"
+        >
+          {" "}
+          Settings{" "}
         </NavButton>
 
         <hr className="my-1 border-gray-300" />

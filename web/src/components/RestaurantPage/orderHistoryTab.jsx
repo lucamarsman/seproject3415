@@ -7,7 +7,7 @@ export default function OrderHistoryTab({ loadingOrders, allOrders = [] }) {
   return (
     <>
       <h2 className="text-2xl font-semibold mb-4">
-        Rejected or Timed-Out Orders ({rejectedOrders.length})
+        Order History ({rejectedOrders.length})
       </h2>
 
       <div className="mt-6">

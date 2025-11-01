@@ -18,6 +18,7 @@ import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
 import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
 import MenuTab from "../components/RestaurantPage/menuTab";
+import SettingsTab from "../components/RestaurantPage/settingsTab";
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -102,6 +103,9 @@ export default function RestaurantPage() {
   const [cuisineTypes, setCuisineTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [selectedType, setSelectedType] = useState("");
+  const [settings, setSettings] = useState({
+    autoSetting: "manual",
+  });
 
   // Auth listener
   useEffect(() => {
@@ -173,7 +177,11 @@ export default function RestaurantPage() {
         });
 
         if (matchedDoc) {
-          setRestaurantData({ id: matchedDoc.id, ...matchedDoc.data() });
+          const data = matchedDoc.data();
+          setRestaurantData({ id: matchedDoc.id, ...data });
+          setSettings({
+            autoSetting: data.autoSetting ?? "manual",
+          });
           setFetchingRestaurant(false);
           return;
         }
@@ -181,6 +189,7 @@ export default function RestaurantPage() {
         // No existing, create new restaurant
         const newRest = {
           address: "",
+          autoSetting: "manual",
           createdAt: Timestamp.fromDate(new Date()),
           email: user.email,
           hours: [
@@ -282,30 +291,16 @@ export default function RestaurantPage() {
     );
 
     setLoadingOrders(true);
-
-    // This listener fires once on subscription (initial load) and on every update
     const unsub = onSnapshot(ordersRef, async (snapshot) => {
       let fetchedOrders = snapshot.docs.map((docSnap) => ({
         orderId: docSnap.id,
         ...docSnap.data(),
       }));
-
-      const now = new Date(); // The currentTime variable
-      
-      console.log("--- Initial Load/Realtime Update Log (onSnapshot) ---");
-      console.log("Current Time (now):", now.toLocaleString()); // currentTime
-      
+      const now = new Date();
       const autoRejectPromises = [];
-
       // Find unhandled orders that are past their timeout
       const timedOutOrders = fetchedOrders.filter(order => {
         const timeout = order.orderTimeout?.toDate?.() || new Date(order.orderTimeout);
-        
-        // Log the variables for every unconfirmed order
-        console.log(`Order ${order.orderId}:`);
-        console.log("  orderTimeout:", timeout ? timeout.toLocaleString() : 'N/A'); // orderTimeout
-        console.log("  deliveryStatus:", order.deliveryStatus); // deliveryStatus
-        console.log("  orderConfirmed:", order.orderConfirmed); // orderConfirmed
         
         // Auto-rejection logic check
         const shouldReject = timeout < now && order.orderConfirmed === null;
@@ -356,10 +351,7 @@ export default function RestaurantPage() {
     if (!restaurantData?.id) return;
 
     const interval = setInterval(() => {
-      const now = new Date(); // The currentTime variable
-
-      console.log("--- Running Interval Check (setInterval) ---");
-      console.log("Current Time (now):", now.toLocaleString()); // currentTime
+      const now = new Date();
       
       orders.forEach((order) => {
         // Only check unconfirmed orders
@@ -510,6 +502,21 @@ export default function RestaurantPage() {
         setError("Failed to reject order.");
     }
   };
+
+  useEffect(() => {
+    if (!restaurantData?.id || orders.length === 0) return;
+
+    const unhandled = orders.filter(o => o.orderConfirmed == null);
+    if (unhandled.length === 0) return;
+
+    if (settings.autoSetting == "accept") {
+      console.log("⚡ Auto Accept enabled — confirming all unhandled orders...");
+      unhandled.forEach(order => handleConfirmOrder(order.orderId));
+    } else if (settings.autoSetting == "reject") {
+      console.log("⚡ Auto Reject enabled — rejecting all unhandled orders...");
+      unhandled.forEach(order => handleRejectOrder(order.orderId));
+    }
+  }, [settings, orders, restaurantData?.id]);
 
   // Rendering
   if (loadingAuth || fetchingRestaurant) return <div>Loading...</div>;
@@ -724,7 +731,7 @@ return (
           
       {/* 3. Order Management Tab (activeTab === "orders") */}
       {activeTab === "orders" && (
-          <OrdersTab // <-- RENDER THE NEW COMPONENT
+          <OrdersTab
               loadingOrders={loadingOrders}
               unhandledOrders={unhandledOrders}
               confirmedOrders={confirmedOrders}
@@ -734,8 +741,7 @@ return (
       )}
       {/* 4. Order History Tab (activeTab === "orderHistory") 
       This is where all orders that have completed the cycle go:
-      A. Rejected by Timeout
-      B. Rejected by Restaurant Managed
+      A. Rejected by Timeout && B. Rejected by Restaurant Manager
       C. Courier picked-up
       */}
       {activeTab === "orderHistory" && (
@@ -747,14 +753,23 @@ return (
 
       {/* 5. Settings Tab (activeTab === "settings") */}
       {activeTab === "settings" && (
-        <>
-          <h2 className="text-2xl font-semibold mb-4">
-            Account and General Settings
-          </h2>
-          <p className="text-gray-600">
-            *Placeholder for account management, password change, notification preferences, etc.*
-          </p>
-        </>
+        <SettingsTab
+          settings={settings}
+          onUpdateSettings={async (newSettings) => {
+            setSettings(newSettings);
+
+            try {
+              const docRef = doc(db, "restaurants", restaurantData.id);
+              await updateDoc(docRef, {
+                autoSetting: newSettings.autoSetting,
+              });
+
+              console.log("✅ Settings saved to Firestore:", newSettings);
+            } catch (err) {
+              //console.error("❌ Failed to save settings:", err);
+            }
+          }}
+        />
       )}
     </div>
   </div>

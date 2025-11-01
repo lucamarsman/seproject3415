@@ -48,7 +48,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
         name: "",
         description: "",
         calories: "",
-        price: "",
+        price: "" ,
         prepTime: "",
         imgUrl: "",
         available: true,
@@ -65,8 +65,10 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     const { value, type, checked } = e.target;
     setRestaurantData((prev) => {
       const newMenu = [...(prev.menu || [])];
-      // Use checked for checkbox, value for others
-      const newValue = type === "checkbox" ? checked : value;
+      let newValue = type === "checkbox" ? checked : value;
+      if (["price", "calories", "prepTime"].includes(field)) {
+        newValue = value === "" ? "" : parseFloat(value);
+      }
       newMenu[index] = { ...newMenu[index], [field]: newValue };
       return { ...prev, menu: newMenu };
     });
