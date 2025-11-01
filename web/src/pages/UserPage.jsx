@@ -2,18 +2,24 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
-  getDocs,
   updateDoc,
   GeoPoint,
   Timestamp,
+  serverTimestamp,
   doc,
   setDoc,
   getDoc,
+  getDocs,
+  addDoc,
   onSnapshot,
+  query, 
+  where
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { Navigate, useNavigate } from "react-router-dom";
 import "../App.css";
+import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
+import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
 
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
@@ -24,8 +30,6 @@ import OrderTab from "../components/UserPage/orderTab";
 import Sidebar from "../components/UserPage/sideBar";
 
 import { dummyRestaurants } from "../assets/dummyRestaurants.js";
-import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
-
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -272,34 +276,62 @@ export default function UserPage() {
         "restaurantOrders"
       );
 
-      const unsubscribe = onSnapshot(ordersRef, (snapshot) => {
+      const unsubscribe = onSnapshot(ordersRef, async (snapshot) => {
+        const now = new Date();
         const restaurantOrders = [];
 
-        snapshot.forEach((docSnap) => {
+        for (const docSnap of snapshot.docs) {
           const orderData = docSnap.data();
-          if (orderData.userId === userData.id) {
-            restaurantOrders.push({ ...orderData, orderId: docSnap.id });
-            /*
-            console.log("Checking order:", {
-              fromRestaurant: restaurant.storeName,
-              orderUserId: orderData.userId,
-              currentUserId: userData.id,
-            });*/
-          }
-        });
+          if (orderData.userId !== userData.id) continue;
 
-        // Update collected orders from all restaurants
+          const timeout =
+            orderData.orderTimeout?.toDate?.() ||
+            (orderData.orderTimeout ? new Date(orderData.orderTimeout) : null);
+
+          const isTimedOut =
+            timeout && timeout < now && orderData.orderConfirmed === null;
+
+          if (isTimedOut) {
+            console.log(`⏰ Order ${docSnap.id} timed out for user.`);
+
+            // 1️⃣ Immediately remove it from UI
+            setUserOrders((prev) => prev.filter((o) => o.orderId !== docSnap.id));
+
+            // 2️⃣ Optimistically add local message
+            setUserMessages((prev) => [
+              {
+                messageId: `local-${docSnap.id}`,
+                createdAt: { toMillis: () => Date.now() },
+                message: `Your order from "${restaurant.storeName}" timed out and could not be fulfilled. Refund has been initiated.`,
+                read: false,
+                type: "order_status",
+                orderId: docSnap.id,
+              },
+              ...prev,
+            ]);
+
+            // 3️⃣ Use the shared util (handles message + Firestore logic safely)
+            updateOrderToRejected(restaurant.id, docSnap.id).catch((err) =>
+              console.error("Failed to handle timed-out order:", err)
+            );
+            continue;
+          }
+
+          restaurantOrders.push({
+            ...orderData,
+            orderId: docSnap.id,
+            fromRestaurant: restaurant.storeName,
+          });
+        }
+
+        // 🔹 6️⃣ Merge restaurant orders into state (fresh copy)
         collectedOrders = [
           ...collectedOrders.filter(
             (o) => o.fromRestaurant !== restaurant.storeName
           ),
-          ...restaurantOrders.map((order) => ({
-            ...order,
-            fromRestaurant: restaurant.storeName,
-          })),
+          ...restaurantOrders,
         ];
 
-        // Set only once all restaurants have been processed at least once
         setUserOrders([...collectedOrders]);
       });
 
@@ -310,6 +342,7 @@ export default function UserPage() {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, [userData?.id, allRestaurants]);
+
 
   // --- MESSAGE LISTENER FOR USER ---
   useEffect(() => {
@@ -423,6 +456,37 @@ export default function UserPage() {
     }
   };
 
+  // --- Timeout check for user-side orders ---
+  useEffect(() => {
+    if (!userData?.id || userOrders.length === 0) return;
+
+    const checkAndRejectTimedOutOrders = async () => {
+      const now = new Date();
+      const timedOut = userOrders.filter(order => {
+        const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
+        return timeout && timeout < now && order.orderConfirmed === null;
+      });
+      if (timedOut.length > 0) {
+        console.log(`User-side: Found ${timedOut.length} timed-out orders.`);
+        await Promise.all(
+          timedOut.map(order =>
+            updateOrderToRejected(order.restaurantId, order.orderId)
+          )
+        );
+        setUserOrders(prev =>
+          prev.map(o =>
+            timedOut.some(t => t.orderId === o.orderId)
+              ? { ...o, orderConfirmed: false, deliveryStatus: "Auto-rejected: Order timed out." }
+              : o
+          )
+        );
+      }
+    };
+    checkAndRejectTimedOutOrders();
+    const interval = setInterval(checkAndRejectTimedOutOrders, 15000);
+    return () => clearInterval(interval);
+  }, [userData?.id, userOrders]);
+
   if (loading || fetchingUser) return <div>Loading...</div>;
 
   if (error)
@@ -487,8 +551,6 @@ export default function UserPage() {
 }
 
 /*
-* Later: Better UI -> top right nav is UserPage user profile link (Name, email, phone* Please complete your user profile before ordering message; delete account)
-* Later: replace tailwind with regular css or get tailwind working
 * Later: Add a precise location pointer on clicking the map (reason: the geolocator is not that precise) or just use location services
 * Later: Special restaurant instructions (allergy)
 * Later: Special courier instructions (gated entry password...)

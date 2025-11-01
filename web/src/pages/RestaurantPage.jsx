@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { Navigate } from "react-router-dom";
 import { auth, db } from "../firebase";
@@ -14,11 +14,14 @@ import {
   onSnapshot,
   serverTimestamp,
 } from "firebase/firestore";
+import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
+
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
 import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
 import MenuTab from "../components/RestaurantPage/menuTab";
 import SettingsTab from "../components/RestaurantPage/settingsTab";
+
 
 // ADDRESS to GEOLOCATION: OpenCage API
 async function geocodeAddress(address) {
@@ -225,63 +228,9 @@ export default function RestaurantPage() {
     fetchOrCreate();
   }, [user]);
 
-  // This function will now handle auto-rejection AND message sending
-  const updateOrderToRejected = async (restaurantId, orderId) => {
-    const orderDocRef = doc(
-        db,
-        "restaurants",
-        restaurantId,
-        "restaurantOrders",
-        orderId
-    );
-
-    try {
-        // --- 1. READ the document to get the userId ---
-        const orderSnapshot = await getDoc(orderDocRef);
-        if (!orderSnapshot.exists()) {
-            console.error(`Order ${orderId} not found for auto-rejection.`);
-            return false;
-        }
-        
-        const orderData = orderSnapshot.data();
-        const userId = orderData.userId;
-
-        // --- 2. UPDATE the Order Status ---
-        await updateDoc(orderDocRef, {
-            orderConfirmed: false,
-            deliveryStatus: "Auto-rejected: Order timed out.",
-        });
-        
-        // --- 3. SEND Message to Customer (Conditional on userId) ---
-        if (userId) {
-            const messagesRef = collection(db, "users", userId, "messages");
-            
-            await addDoc(messagesRef, {
-                createdAt: serverTimestamp(), 
-                message: "Order timed out and could not be fulfilled, refund sent.",
-                read: false, 
-                type: "order_status",
-                orderId: orderId,
-            });
-            
-            console.log(`Auto-rejection message sent to user ${userId}.`);
-        }
-
-        console.log(`Order ${orderId} auto-rejected due to timeout.`);
-        return true; // Indicate success
-        
-    } catch (err) {
-        console.error(`Failed to auto-reject order ${orderId} or send message:`, err);
-        return false;
-    }
-  };
-
   // --- Realtime listener for restaurantOrders (Initial load + updates)
   useEffect(() => {
-    if (!restaurantData?.id) {
-      setLoadingOrders(false);
-      return;
-    }
+    if (!restaurantData?.id) return;
 
     const ordersRef = collection(
       db,
@@ -290,90 +239,71 @@ export default function RestaurantPage() {
       "restaurantOrders"
     );
 
-    setLoadingOrders(true);
-    const unsub = onSnapshot(ordersRef, async (snapshot) => {
-      let fetchedOrders = snapshot.docs.map((docSnap) => ({
-        orderId: docSnap.id,
-        ...docSnap.data(),
-      }));
-      const now = new Date();
-      const autoRejectPromises = [];
-      // Find unhandled orders that are past their timeout
-      const timedOutOrders = fetchedOrders.filter(order => {
-        const timeout = order.orderTimeout?.toDate?.() || new Date(order.orderTimeout);
-        
-        // Auto-rejection logic check
-        const shouldReject = timeout < now && order.orderConfirmed === null;
-        if (shouldReject) {
-            console.log(`!!! Order ${order.orderId} is TIMED OUT and UNHANDLED.`);
-        }
+    let firstLoad = true; // Track initial load for loading state
 
+    const processOrders = async (ordersArray) => {
+      const now = new Date();
+      const timedOutOrders = ordersArray.filter((order) => {
+        const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
+        const shouldReject = timeout && order.orderConfirmed === null && timeout < now;
+        if (shouldReject) {
+          console.log(`!!! Order ${order.orderId} is TIMED OUT.`);
+        }
         return shouldReject;
       });
 
-      // 1. Trigger ALL necessary Firestore updates in parallel
-      timedOutOrders.forEach(order => {
-        autoRejectPromises.push(updateOrderToRejected(restaurantData.id, order.orderId));
-      });
+      await Promise.all(
+        timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
+      );
 
-      // Wait for all Firestore updates to complete (optional, but ensures console logs finish)
-      await Promise.all(autoRejectPromises);
-
-      // 2. IMPORTANT: Immediately update the local state to reflect the rejection
-      if (timedOutOrders.length > 0) {
-        fetchedOrders = fetchedOrders.map(order => {
-          if (timedOutOrders.some(tOrder => tOrder.orderId === order.orderId)) {
-            // Update the local object with the rejected status
-            return {
-              ...order,
-              orderConfirmed: false,
-              deliveryStatus: "Auto-rejected: Order timed out."
-            };
-          }
-          return order;
-        });
-      }
-
-      // Set the final state
-      setOrders(fetchedOrders);
-      setLoadingOrders(false);
-    }, (error) => {
-      console.error("Error listening to orders:", error);
-      setError("Error fetching orders.");
-      setLoadingOrders(false);
-    });
-
-    return () => unsub(); // Cleanup listener on unmount/dependency change
-  }, [restaurantData?.id]);
-
-  // --- Running check for orders that are approaching/past timeout (every 10 seconds)
-  useEffect(() => {
-    if (!restaurantData?.id) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      
-      orders.forEach((order) => {
-        // Only check unconfirmed orders
-        if (order.orderConfirmed === null) {
-          const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
-          // Log the variables
-          console.log(`Order ${order.orderId}:`);
-          console.log("  orderTimeout:", timeout ? timeout.toLocaleString() : 'N/A'); // orderTimeout
-          console.log("  deliveryStatus:", order.deliveryStatus); // deliveryStatus
-          console.log("  orderConfirmed:", order.orderConfirmed); // orderConfirmed
-          
-          if (timeout && timeout < now) {
-            console.log(`!!! Order ${order.orderId} is TIMED OUT, initiating rejection.`);
-            updateOrderToRejected(restaurantData.id, order.orderId);
-          }
+      const updatedOrders = ordersArray.map(order => {
+        if (timedOutOrders.some(tOrder => tOrder.orderId === order.orderId)) {
+          return {
+            ...order,
+            orderConfirmed: false,
+            deliveryStatus: "Auto-rejected: Order timed out."
+          };
         }
+        return order;
       });
-    }, 10000); // Check every 10 seconds
-    return () => clearInterval(interval);
+
+      setOrders(updatedOrders);
+
+      if (firstLoad) {
+        setLoadingOrders(false);
+        firstLoad = false;
+      }
+    };
+
+    // --- Real-time listener
+    const unsub = onSnapshot(
+      ordersRef,
+      (snapshot) => {
+        const fetchedOrders = snapshot.docs.map((docSnap) => ({
+          orderId: docSnap.id,
+          ...docSnap.data(),
+        }));
+        processOrders(fetchedOrders);
+      },
+      (error) => {
+        console.error("Error listening to orders:", error);
+        setError("Error fetching orders.");
+        if (firstLoad) setLoadingOrders(false);
+      }
+    );
+
+    // --- Interval to check timed-out orders every 15s
+    const interval = setInterval(() => {
+      if (orders.length === 0) return;
+      processOrders(orders);
+    }, 15000);
+
+    return () => {
+      unsub();
+      clearInterval(interval);
+    };
   }, [restaurantData?.id, orders]);
 
-  
   const handleConfirmOrder = async (orderId) => {
     try {
       const orderDocRef = doc(
@@ -503,20 +433,31 @@ export default function RestaurantPage() {
     }
   };
 
+  const handledOrders = useRef(new Set());
+
   useEffect(() => {
     if (!restaurantData?.id || orders.length === 0) return;
 
-    const unhandled = orders.filter(o => o.orderConfirmed == null);
+    // Only unhandled orders that haven't been processed yet
+    const unhandled = orders.filter(
+      o => o.orderConfirmed == null && !handledOrders.current.has(o.orderId)
+    );
     if (unhandled.length === 0) return;
 
-    if (settings.autoSetting == "accept") {
-      console.log("⚡ Auto Accept enabled — confirming all unhandled orders...");
-      unhandled.forEach(order => handleConfirmOrder(order.orderId));
-    } else if (settings.autoSetting == "reject") {
-      console.log("⚡ Auto Reject enabled — rejecting all unhandled orders...");
-      unhandled.forEach(order => handleRejectOrder(order.orderId));
+    if (settings.autoSetting === "accept") {
+      console.log(`⚡ Auto Accept enabled — confirming ${unhandled.length} order(s)...`);
+      for (const order of unhandled) {
+        handledOrders.current.add(order.orderId);
+        handleConfirmOrder(order.orderId);
+      }
+    } else if (settings.autoSetting === "reject") {
+      console.log(`⚡ Auto Reject enabled — rejecting ${unhandled.length} order(s)...`);
+      for (const order of unhandled) {
+        handledOrders.current.add(order.orderId);
+        handleRejectOrder(order.orderId);
+      }
     }
-  }, [settings, orders, restaurantData?.id]);
+  }, [orders, restaurantData, settings]);
 
   // Rendering
   if (loadingAuth || fetchingRestaurant) return <div>Loading...</div>;
