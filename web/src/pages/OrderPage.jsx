@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, updateDoc, GeoPoint, Timestamp, increment } from "
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
+import { isRestaurantAcceptingOrders } from "../utils/isRestaurantAcceptingOrders.js";
 
 import defaultImage from "../assets/defaultImgUrl.png";
 const DEFAULT_IMAGE_URL = defaultImage;
@@ -117,11 +118,17 @@ export default function OrderPage() {
       return;
     }
 
+    if (!isRestaurantAcceptingOrders(restaurant.autoSetting)) {
+      alert("Store is currently not accepting orders.");
+      return;
+    }
+
     if (total === 0) {
       alert("Please add at least one item to your order.");
       return;
     }
 
+    //THIS MAY BE DELAYED DUE TO GEOLOCATOR LAG AND CAUSE AN ALERT ON ORDERING
     if (!userData?.deliveryLocation || !userData?.address) {
       alert("Missing user location or address.");
       return;
@@ -284,5 +291,4 @@ export default function OrderPage() {
          ~ Restaurant:	        Food revenue (minus platform commission)
          ~ Delivery Driver:	    Delivery fee + tip (via platform)
          ~ Platform (Delivery):	Commission + service fees
-* Later: If the store is closed, orders cannot be placed
 */

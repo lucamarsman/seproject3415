@@ -48,7 +48,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
         name: "",
         description: "",
         calories: "",
-        price: "" ,
+        price: "",
         prepTime: "",
         imgUrl: "",
         available: true,

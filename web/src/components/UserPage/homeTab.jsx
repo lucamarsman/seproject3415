@@ -4,6 +4,7 @@ import L from "leaflet";
 
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
+import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
 
 function MapSetTo({ position }) {
   const map = useMap();
@@ -93,6 +94,7 @@ const restaurantIcon = new L.Icon({
   shadowSize: [41, 41],
   shadowAnchor: [13, 41],
 });
+
 
 export default function HomeTab({
   userLatLng,
@@ -331,6 +333,7 @@ export default function HomeTab({
 
               {r.hours && (
                 <p className="mt-2 font-medium">
+                  {/* OPEN / CLOSED STATUS */}
                   <span
                     className={`text-sm ${
                       isRestaurantOpenToday(r.hours, currentDateTime)
@@ -342,22 +345,27 @@ export default function HomeTab({
                       ? "Open"
                       : "Closed"}
                   </span>
+
+                  {/* HOURS RANGE */}
                   <span className="ml-2 text-sm text-gray-500">
                     {(() => {
                       const dayName = new Date().toLocaleDateString("en-US", {
                         weekday: "long",
                       });
-                      const todayHours = r.hours.find(
-                        (entry) => entry[dayName]
-                      );
+                      const todayHours = r.hours.find((entry) => entry[dayName]);
                       if (!todayHours) return "(No hours set)";
                       const opening = todayHours[dayName].Opening;
                       const closing = todayHours[dayName].Closing;
-                      return `(${formatTime(opening)} - ${formatTime(
-                        closing
-                      )})`;
+                      return `(${formatTime(opening)} - ${formatTime(closing)})`;
                     })()}
                   </span>
+
+                  {/* AUTOSETTING STATUS */}
+                  {!isRestaurantAcceptingOrders(r.autoSetting) && (
+                    <span className="ml-2 text-red-600 text-sm font-medium">
+                      — Currently not accepting orders
+                    </span>
+                  )}
                 </p>
               )}
             </button>

@@ -10,7 +10,7 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
 
   const handleChange = (newMode) => {
     setAutoMode(newMode);
-    onUpdateSettings?.({ autoSetting: newMode }); // match the key in RestaurantPage
+    onUpdateSettings?.({ autoSetting: newMode });
   };
 
   return (
