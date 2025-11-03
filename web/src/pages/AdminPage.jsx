@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
-import { db } from "../firebase"; // adjust path as needed
+import { db } from "../firebase";
 
 export default function AdminPage() {
   const [timeoutValue, setTimeoutValue] = useState(10000); // how often the client checks for order timeout
@@ -126,8 +126,7 @@ export default function AdminPage() {
 }
 
 
-/*
-
+/* Possibly delete this:
 * SYSTEM VARIABLES SHOULD BE UPDATED HERE
 ~ maxRestaurantSearchDistance <- (currently hardcoded Math.min(radius, [100]) in UserPage.jsx)
 ~ maxCourierSearchDistance <- (currently hardcoded as distKm <= [50] in RestaurantPage.jsx)

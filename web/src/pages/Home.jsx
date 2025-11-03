@@ -39,10 +39,7 @@ export default function Home() {
 
                 let iconLookup = {};
                 if (configSnap.exists() && Array.isArray(configSnap.data().typeIcons)) {
-                    // Convert the array of maps [{type:'Pizza', icon:'🍕'}, ...]
-                    // into a simple object map { 'Pizza': '🍕', ... } for quick lookup
                     iconLookup = configSnap.data().typeIcons.reduce((acc, item) => {
-                        // Assuming the item structure is { type: "...", icon: "..." }
                         if (item.type && item.icon) {
                             acc[item.type] = item.icon;
                         }

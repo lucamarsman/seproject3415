@@ -18,7 +18,6 @@ import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
 import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 
-
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
 import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
@@ -46,25 +45,11 @@ export default function RestaurantPage() {
   const [activeTab, setActiveTab] = useState("info");
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
-
   const [restaurantData, setRestaurantData] = useState(null);
   const [fetchingRestaurant, setFetchingRestaurant] = useState(true);
-
   const [error, setError] = useState("");
-
   const [hoursState, setHoursState] = useState({});
-
-  const [newMenuItem, setNewMenuItem] = useState({
-    name: "",
-    description: "",
-    calories: "",
-    price: "",
-    prepTime: "",
-    imgUrl: "",
-    available: true,
-  });
   
-
   // For orders
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -234,7 +219,7 @@ useEffect(() => {
             timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
         );
         
-        // 2. Update local state for all successful rejections 🚀
+        // 2. Update local state for all successful rejections
         const successfullyRejectedIds = timedOutOrders
             .filter((_, index) => rejectionResults[index].success)
             .map(order => order.orderId);
@@ -255,8 +240,6 @@ useEffect(() => {
                 });
             });
         }
-        
-        // No firstLoad management here.
     };
 
     // 1️⃣ REAL-TIME LISTENER: Updates the UI/local state (setOrders) and manages loading
@@ -673,8 +656,7 @@ return (
           />
       )}
       {/* 4. Order History Tab (activeTab === "orderHistory") 
-      This is where all orders that have completed the cycle go:
-      A. Rejected by Timeout && B. Rejected by Restaurant Manager
+      This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager
       C. Courier picked-up
       */}
       {activeTab === "orderHistory" && (
@@ -714,10 +696,7 @@ return (
 **** The accepted orders under heading "Orders awaiting pickup"
        * button "Pick-up completed" pressed -> deliveryStatus: "order being delivered" (hypothetical: on courier arrival, courierId match)
 
-* Server (24/7) tasks:
-* clients need to go through server to access database
-~All restaurantOrders: updates orderTimeout periodically (currently: each restaurant is doing this client side, doesn't work if the client restaurant not online)
-~All restaurantOrders: a simple periodically updating function that assigns orders to multiple couriers based on (currently: each restaurant is doing this client side, doesn't work if the client restaurant not online);
+~All restaurantOrders: a periodically updating function that assigns orders to multiple couriers based on (currently: each restaurant is doing this client side, doesn't work if the client restaurant not online);
 - Need a rejectedArray if courier rejects
 - Need a periodic courierArray updater that checks against rejectedArray and only updates if courierId = ""
 - If no available couriers, reassign to rejectedArray with higher earning

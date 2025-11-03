@@ -509,8 +509,5 @@ export default function UserPage() {
 * Advanced: Message system to admin team if excessive wait time
 * Advanced: order from multiple restaurants in one order.
 
-
 # Assumes GPS is generally static, user can modify in input section
-# Search radius: start local at 25km (small selection -> limited search results)
-                 max distance at 100km (some people might want specialty takeout -> issue with ordering large amount of results)
 */

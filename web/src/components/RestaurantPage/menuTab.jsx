@@ -12,7 +12,101 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     prepTime: "",
     imgUrl: "",
     available: true,
+    modifications: [],
   });
+
+  const [newModName, setNewModName] = useState("");
+  const [newModPrice, setNewModPrice] = useState("");
+  const [editingMod, setEditingMod] = useState({}); // { itemIndex: { name: '', price: '' } }
+
+  // --- Handlers for New Item Modifications ---
+  const handleAddModification = () => {
+    if (!newModName.trim()) {
+      alert("Modification name is required.");
+      return;
+    }
+    const priceValue = parseFloat(newModPrice || 0);
+    if (isNaN(priceValue)) {
+      alert("Invalid price value.");
+      return;
+    }
+
+    const newMod = {
+      name: newModName.trim(),
+      price: priceValue,
+    };
+
+    setNewMenuItem((prev) => ({
+      ...prev,
+      modifications: [...prev.modifications, newMod],
+    }));
+    
+    // Reset modification inputs
+    setNewModName("");
+    setNewModPrice("");
+  };
+
+  const handleRemoveModification = (modIndex) => {
+    setNewMenuItem((prev) => ({
+      ...prev,
+      modifications: prev.modifications.filter((_, i) => i !== modIndex),
+    }));
+  };
+
+  // --- Handlers for Existing Item Modifications ---
+  const handleRemoveExistingModification = (itemIndex, modIndex) => {
+    setRestaurantData((prev) => {
+      const newMenu = [...(prev.menu || [])];
+      const item = newMenu[itemIndex];
+      item.modifications = (item.modifications || []).filter((_, i) => i !== modIndex);
+      return { ...prev, menu: newMenu };
+    });
+  };
+
+  const handleAddExistingModification = (itemIndex, modName, modPrice) => {
+    if (!modName.trim()) {
+      alert("Modification name is required.");
+      return;
+    }
+    const priceValue = parseFloat(modPrice || 0);
+    if (isNaN(priceValue)) {
+      alert("Invalid price value.");
+      return;
+    }
+
+    const newMod = {
+      name: modName.trim(),
+      price: priceValue,
+    };
+
+    setRestaurantData((prev) => {
+      const newMenu = [...(prev.menu || [])];
+      const item = newMenu[itemIndex];
+      
+      const currentMods = item.modifications || [];
+      item.modifications = [...currentMods, newMod];
+      return { ...prev, menu: newMenu };
+    });
+  };
+
+  const handleEditingModChange = (itemIndex, field, value) => {
+    setEditingMod(prev => ({
+      ...prev,
+      [itemIndex]: {
+        ...prev[itemIndex],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleSaveEditingMod = (itemIndex) => {
+    const modData = editingMod[itemIndex] || { name: '', price: '' };
+    
+    handleAddExistingModification(itemIndex, modData.name, modData.price); 
+
+    // Clear the inputs after successful add
+    setEditingMod(prev => ({ ...prev, [itemIndex]: { name: '', price: '' } }));
+  };
 
   // Handler to add a new menu item
   const handleAddItem = async (e) => {
@@ -26,12 +120,13 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
 
     // Prepare the item for Firestore: parse number strings to actual numbers
     const item = {
-    ...newMenuItem,
-    imgUrl: finalImgUrl, 
-    calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
-    price: parseFloat(newMenuItem.price),
-    prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
-  };
+      ...newMenuItem,
+      imgUrl: finalImgUrl, 
+      calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
+      price: parseFloat(newMenuItem.price),
+      prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
+      modifications: newMenuItem.modifications || [], // 🟢 Include modifications
+    };
 
     const updatedMenu = [...(restaurantData.menu || []), item];
 
@@ -52,7 +147,10 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
         prepTime: "",
         imgUrl: "",
         available: true,
+        modifications: []
       });
+      setNewModName("");
+      setNewModPrice("");
       alert("Menu item added");
     } catch (err) {
       console.error("Add menu item error:", err);
@@ -69,6 +167,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
       if (["price", "calories", "prepTime"].includes(field)) {
         newValue = value === "" ? "" : parseFloat(value);
       }
+      // Ensure modifications field is retained when updating other fields
       newMenu[index] = { ...newMenu[index], [field]: newValue };
       return { ...prev, menu: newMenu };
     });
@@ -81,6 +180,8 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     // Convert string values back to numbers for Firestore/state consistency before saving
     const formattedItem = {
       ...itemToUpdate,
+      // Ensure modifications is not lost if it was empty/undefined
+      modifications: itemToUpdate.modifications || [],
       calories: itemToUpdate.calories ? parseInt(itemToUpdate.calories) : null,
       price: parseFloat(itemToUpdate.price),
       prepTime: itemToUpdate.prepTime ? parseInt(itemToUpdate.prepTime) : null,
@@ -143,8 +244,8 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
           placeholder="Name"
           value={newMenuItem.name}
           onChange={(e) =>
-                setNewMenuItem((prev) => ({ ...prev, name: e.target.value }))
-              }
+            setNewMenuItem((prev) => ({ ...prev, name: e.target.value }))
+          }
           className="w-full border px-3 py-2 rounded"
           required
         />
@@ -205,6 +306,59 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
             className="border px-3 py-2 rounded"
           />
         </div>
+        
+        {/* MODIFICATIONS MANAGEMENT SECTION (NEW ITEM) */}
+        <div className="border border-gray-300 p-3 rounded space-y-3 bg-white">
+            <h4 className="font-medium text-gray-700">Custom Checkbox Options (Modifications)</h4>
+            
+            {/* List Existing Modifications for New Item */}
+            {newMenuItem.modifications.length > 0 && (
+                <ul className="space-y-1 text-sm max-h-32 overflow-y-auto">
+                    {newMenuItem.modifications.map((mod, i) => (
+                        <li key={i} className="flex justify-between items-center bg-gray-50 p-2 border rounded">
+                            <span>{mod.name} (${mod.price.toFixed(2)})</span>
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveModification(i)}
+                                className="text-red-500 hover:text-red-700 text-lg ml-2"
+                                title="Remove option"
+                            >
+                                &times;
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            {/* Input for New Modification */}
+            <div className="flex gap-2">
+                <input
+                    type="text"
+                    placeholder="Option Name (e.g., Add Cheese)"
+                    value={newModName}
+                    onChange={(e) => setNewModName(e.target.value)}
+                    className="flex-grow border px-3 py-2 rounded text-sm"
+                />
+                <input
+                    type="number"
+                    placeholder="Price"
+                    min= "0"
+                    step="0.01"
+                    value={newModPrice}
+                    onChange={(e) => setNewModPrice(e.target.value)}
+                    className="w-20 border px-3 py-2 rounded text-sm"
+                />
+            </div>
+            <button
+                type="button"
+                onClick={handleAddModification}
+                className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm w-full"
+            >
+                + Add Option
+            </button>
+        </div>
+        {/* END MODIFICATIONS SECTION */}
+
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -225,8 +379,6 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
           Add Item to Menu
         </button>
       </form>
-
-      {/* --- */}
 
       {/* Current Menu Display */}
       {restaurantData.menu && restaurantData.menu.length > 0 && (
@@ -295,6 +447,59 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
                       placeholder="Image URL"
                       className="text-sm w-full border px-2 py-1 rounded"
                     />
+                    
+                    {/* EDITABLE MODIFICATIONS DISPLAY AND DELETE (EXISTING ITEM) */}
+                    {(item.modifications && item.modifications.length > 0) && (
+                        <div className="mt-2 p-3 bg-gray-100 rounded">
+                            <span className="text-xs font-bold text-gray-600 block mb-2">Options:</span>
+                            <ul className="space-y-1 text-sm">
+                                {item.modifications.map((mod, i) => (
+                                    <li key={i} className="flex justify-between items-center bg-white p-2 rounded border border-gray-200">
+                                        <span className="text-gray-700">{mod.name} (${mod.price.toFixed(2)})</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveExistingModification(idx, i)}
+                                            className="text-red-500 hover:text-red-700 text-base ml-2 transition-colors"
+                                            title="Remove option"
+                                        >
+                                            &times;
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    
+                    {/* ADD NEW MODIFICATION TO EXISTING ITEM */}
+                    <div className="mt-2 pt-3 border-t border-gray-200">
+                        <span className="text-xs font-semibold text-gray-600 block mb-2">Add New Option:</span>
+                        <div className="flex gap-2 items-center">
+                            <input
+                                type="text"
+                                placeholder="Option Name"
+                                value={editingMod[idx]?.name || ""}
+                                onChange={(e) => handleEditingModChange(idx, 'name', e.target.value)}
+                                className="flex-grow border px-2 py-1 rounded text-xs"
+                            />
+                            <input
+                                type="number"
+                                placeholder="Price"
+                                step="0.01"
+                                value={editingMod[idx]?.price || ""}
+                                onChange={(e) => handleEditingModChange(idx, 'price', e.target.value)}
+                                className="w-16 border px-2 py-1 rounded text-xs"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => handleSaveEditingMod(idx)}
+                                className="bg-blue-500 text-white text-xs px-2 py-1 rounded hover:bg-blue-600 flex-shrink-0"
+                                disabled={!editingMod[idx]?.name} // Disable if name is empty
+                            >
+                                + Add
+                            </button>
+                        </div>
+                    </div>
+                    {/* END ADD NEW MODIFICATION */}
 
                     <label className="flex items-center gap-2 text-sm">
                       <input
