@@ -429,6 +429,35 @@ export default function UserPage() {
     }
   };
 
+  const handleUserReply = async (orderId, newRestaurantNote) => {
+    if (!userData?.id) {
+        console.error("User data is not available to send a reply.");
+        throw new Error("User not authenticated.");
+    }
+    const orderToUpdate = userOrders.find(o => o.orderId === orderId);
+    if (!orderToUpdate || !orderToUpdate.restaurantId) {
+        console.error("Order or restaurantId not found for reply:", orderId);
+        throw new Error("Order not found or incomplete data.");
+    }
+    try {
+        const orderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);
+        
+        // 2. Update the document with the new notes array
+        await updateDoc(orderRef, { 
+            restaurantNote: newRestaurantNote 
+        });
+
+        // 3. Immediately reflect the change in the local state (userOrders)
+        setUserOrders(prev => 
+            prev.map(o => o.orderId === orderId ? { ...o, restaurantNote: newRestaurantNote } : o)
+        );
+    } catch (error) {
+        console.error("Error sending user reply:", error);
+        // Rethrow the error so the child component can handle the local alert/saving state cleanup
+        throw new Error("Failed to send reply to the restaurant."); 
+    }
+  };
+
   if (loading || fetchingUser) return <div>Loading...</div>;
 
   if (error)
@@ -447,7 +476,12 @@ export default function UserPage() {
       />
 
       <main className="flex-1 p-6 overflow-y-auto">
-        {activeTab === "orders" && <OrderTab userOrders={userOrders} />}
+        {activeTab === "orders" && 
+        <OrderTab 
+          userOrders={userOrders}
+          handleUserReply={handleUserReply}
+          userId={userData?.id}
+        />}
 
         {activeTab === "settings" && (
           <SettingTab
@@ -494,15 +528,12 @@ export default function UserPage() {
 
 /*
 * Later: Add a precise location pointer on clicking the map (reason: the geolocator is not that precise) or just use location services
-* Later: Special restaurant instructions (allergy)
-* Later: Special courier instructions (gated entry password...)
 * Later: Show courier moving on map (car icon)
 * Later: Do not allow orders on closed stores, do not show closed stores, do not retrieve closed stores
 * Later: If a courier is not in range of the closing time of a restaurant (show the location, but do not allow orders)
 * Later: To reduce LIST search results (Fetch restaurants):
-    ~ 1. filter all by distance (max distance up to 100km) -> Done with toggling +/- âœ…
-    ~ 2. filter by open hours -> possibly keep, but closed are ordered to lowest on list
-    ~ 3. no places with the same name after 5 occurances
+    ~ 1. filter by open hours -> possibly keep, but closed are ordered to lowest on list
+    ~ 2. no places with the same name after 5 occurances
 * Maybe: Since anyone can create a restaurant, many can appear on the map. Preferential appearance based on totalOrders from unique userId. Advanced (restaurant): Paid preferential appearance option like Google Search.
 * Maybe: Status updates from system (admin has contacted courier, admin has changed courier, estimated wait time)
 * Maybe: System updates from courier (waiting for restaurant, assistance button pressed)

@@ -419,15 +419,24 @@ useEffect(() => {
     );
     if (unhandled.length === 0) return;
 
+    /* AUTO ACCEPT AND REJECT */
     if (settings.autoSetting === "accept") {
-      console.log(`⚡ Auto Accept enabled — confirming ${unhandled.length} order(s)...`);
+      console.log(`⚡ Auto Accept enabled — checking ${unhandled.length} order(s)...`);
       for (const order of unhandled) {
-        handledOrders.current.add(order.orderId);
-        handleConfirmOrder(order.orderId);
+        const requiresManualReview = order.restaurantNote && order.restaurantNote.trim() !== "";
+        if (requiresManualReview) {
+          console.log(`⚠️ Order ${order.orderId} skipped auto-accept due to special customer note. Manual review required.`);
+        } else {
+          console.log(`✅ Auto-confirming order ${order.orderId}`);
+          handledOrders.current.add(order.orderId);
+          handleConfirmOrder(order.orderId);
+        }
       }
     } else if (settings.autoSetting === "reject") {
       console.log(`⚡ Auto Reject enabled — rejecting ${unhandled.length} order(s)...`);
       for (const order of unhandled) {
+        // Auto-reject is generally always enforced, regardless of a note, 
+        // as the restaurant isn't accepting orders anyway.
         handledOrders.current.add(order.orderId);
         handleRejectOrder(order.orderId);
       }
@@ -648,6 +657,7 @@ return (
       {/* 3. Order Management Tab (activeTab === "orders") */}
       {activeTab === "orders" && (
           <OrdersTab
+              restaurantData={restaurantData}
               loadingOrders={loadingOrders}
               unhandledOrders={unhandledOrders}
               confirmedOrders={confirmedOrders}
@@ -702,16 +712,8 @@ return (
 - If no available couriers, reassign to rejectedArray with higher earning
 * courierArray created to find all nearby couriers available for order (should be admin server job for orderConfirmed=true orders and updated consistently)
 
-* Later: Delete profile field (top right nav user UI)
+* Later: Delete button in settings
 * Later: Add a precise location pointer on clicking the map (reason: the geolocator is not that precise)
-* Later: restaurant must show orders (have a confirm & reject button) -> orderConfirmed: null; Status: awaiting restaurant confirmation
-         confirm -> orderConfirmed = True -> deliveryStatus: "order confirmed, being prepared" [DONE]
-         reject -> orderConfirmed = False -> deliveryStatus: "order rejected" [DONE]
-         timeout -> deliveryStatus: "order rejected" (needs to be a central server running 24/7 [admin] that handles order rejection to work properly)
-         on rejection, orderConfirmed = false -> message sent to userId in /users/{userId}/messages/message
-         -> createdAt = current time; message = "Order could not be fulfilled, refund sent" [DONE]; 
-         -> possibly a copy of each message in a new collection of stored messages to view all later [LATER]
-         -> send refund [LATER]
 * Maybe: field to upload logo that appears on map
 * Advanced: If restaurant does not accept the order -> refund user if not accepted
 */

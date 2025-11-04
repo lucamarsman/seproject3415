@@ -14,7 +14,7 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
   };
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <div className="mt-10">
       <h2 className="text-2xl font-semibold mb-6 border-b pb-2">
         System Settings
       </h2>

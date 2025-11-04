@@ -26,8 +26,8 @@ export default function OrderPage() {
 
   // State for modifications
   const [selectedModifications, setSelectedModifications] = useState({}); // { itemIndex: [{ name: '...', price: 0.00 }, ...] }
-  const [restaurantNote, setRestaurantNote] = useState("");
-
+  const [restaurantNote, setRestaurantNote] = useState([]);
+  
   // SINGLE auth listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(getAuth(), async (user) => {
@@ -124,6 +124,18 @@ export default function OrderPage() {
             ...prev,
             [itemIndex]: newMods,
         };
+    });
+  };
+
+  // Handler: Update the 0th element of the restaurantNote array
+  const handleGlobalNoteChange = (e) => {
+    const newNote = e.target.value;
+    setRestaurantNote(prevNotes => {
+        // Create a new array based on the previous state
+        const newNotes = [...prevNotes]; 
+        // Set the new note text as the 0th element
+        newNotes[0] = newNote;
+        return newNotes;
     });
   };
 
@@ -371,9 +383,8 @@ export default function OrderPage() {
                     rows="2"
                     className="w-full border px-3 py-2 rounded text-sm resize-none"
                     placeholder="If filled, order acceptance at restaurant discretion."
-                    value={restaurantNote}
-                    onChange={(e) => setRestaurantNote(e.target.value)}
-                />
+                    value={restaurantNote[0] || ""}
+                    onChange={handleGlobalNoteChange}                />
             </div>
           </div>
           {/* PAYMENT SECTION */}
