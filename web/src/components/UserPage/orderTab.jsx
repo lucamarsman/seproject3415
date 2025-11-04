@@ -6,6 +6,7 @@ export default function OrdersTab({
     userOrders = [], 
     handleUserReply, 
     userId,
+    userName,
     Timestamp 
 }) {
     // 1. State to manage the user's reply text for each order ID
@@ -26,15 +27,10 @@ export default function OrdersTab({
         // --- TIMEOUT LOGIC ---
         const newTimeoutMillis = Date.now() + REPLY_TIMEOUT_EXTENSION_MS;
         const newOrderTimeout = { seconds: Math.floor(newTimeoutMillis / 1000), nanoseconds: 0 }; 
-        const isOriginalPost = !currentNotes || currentNotes.length === 0;
+        const isOriginalPost = currentNotes.length === 1;
         const timeString = new Date().toLocaleTimeString();
         
-        let userNote;
-        if (isOriginalPost) {
-            userNote = `Customer original message (${timeString}): ${trimmedReply}`;
-        } else {
-            userNote = `Customer Reply (${timeString}): ${trimmedReply}`;
-        }
+        let userNote = `${userName} (${timeString}): ${trimmedReply}`;
         
         // Prepare the new notes array (append the new note)
         const newNotes = [...(Array.isArray(currentNotes) ? currentNotes : []), userNote];
@@ -75,10 +71,10 @@ export default function OrdersTab({
                         key={orderId || index}
                         className={containerClassName}
                     >
-                        {/* Order Details, Items Section... (omitted for brevity) */}
+                        {/* Order Details */}
                         <h3 className="font-semibold text-lg mb-1">Order #{index + 1}</h3>
                         <p><strong>Status:</strong> {order.deliveryStatus}</p>
-                        <p><strong>Restaurant:</strong> {order.fromRestaurant || "Restaurant"} <span className="text-gray-600">— {order.restaurantAddress}</span></p>
+                        <p><strong>Restaurant:</strong> {order.fromRestaurant} <span className="mb-2">— {order.restaurantAddress}</span></p>
                         <p><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
                         <p><strong>Order Date:</strong> {order.createdAt?.toDate().toLocaleString()}</p>
                         
@@ -107,17 +103,17 @@ export default function OrdersTab({
                         {/* Order Notes / Messages Section */}
                         {Array.isArray(order.restaurantNote) && order.restaurantNote.length > 0 && (
                             <div className="mt-4 pt-2 border-t border-gray-200">
-                                <strong className="block mb-1 text-base">Order Notes / Messages:</strong>
+                                <strong className="block mb-1 text-base">Order Note: / Messages:</strong>
                                 <ul className="space-y-3">
                                     {order.restaurantNote.map((note, noteIdx) => {
                                         const noteContent = (note && typeof note === 'string') ? note.trim() : '';
                                         if (noteContent === "") return null;
 
                                         let noteClass;
-                                        if (noteContent.startsWith("Customer Reply") || noteContent.startsWith("Customer original message")) {
-                                            noteClass = "bg-blue-100 border-blue-300 text-blue-800"; 
-                                        } else if (noteContent.startsWith("Manager Reply")) {
+                                        if (noteContent.startsWith(`${order.fromRestaurant}`)) {
                                             noteClass = "bg-red-100 border-red-300 text-red-800";
+                                        } else if (noteContent.startsWith(`${userName}`)) {
+                                            noteClass = "bg-blue-100 border-blue-300 text-blue-800"; 
                                         } else {
                                             noteClass = "bg-gray-100 border-gray-300 text-gray-800"; 
                                         }
@@ -135,7 +131,7 @@ export default function OrdersTab({
                         {/* 4. Conditional User Reply Textarea and Button */}
                         {canReply && (
                             <div className="mt-4 pt-2 border-t border-gray-200">
-                                <strong className="block mb-2 text-sm text-blue-700">Message to Restaurant:</strong>
+                                <strong className="mb-2 block">Message to Restaurant:</strong>
                                 <textarea
                                     value={replyText[orderId] || ''}
                                     onChange={(e) => setReplyText({ ...replyText, [orderId]: e.target.value })}

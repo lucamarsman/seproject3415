@@ -180,23 +180,22 @@ export default function RestaurantPage() {
   }, [user]);
 
   // --- Realtime listener for restaurantOrders (Initial load + updates)
-const ordersRef = useRef(orders); // Ref to hold the mutable 'orders' state
+  const ordersRef = useRef(orders); // Ref to hold the mutable 'orders' state
 
-useEffect(() => {
+  useEffect(() => {
     // Update the ref whenever the 'orders' state changes
     ordersRef.current = orders; 
-}, [orders]); 
-// --- Realtime listener and Interval Logic ---
-useEffect(() => {
+  }, [orders]); 
+
+  // --- Realtime listener and Interval Logic ---
+  useEffect(() => {
     if (!restaurantData?.id) return;
-
     const ordersCollectionRef = collection(
-        db,
-        "restaurants",
-        restaurantData.id,
-        "restaurantOrders"
+      db,
+      "restaurants",
+      restaurantData.id,
+      "restaurantOrders"
     );
-
     let firstLoad = true; 
 
     // processOrders is now an ACTION function

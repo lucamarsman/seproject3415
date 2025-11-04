@@ -429,33 +429,45 @@ export default function UserPage() {
     }
   };
 
-  const handleUserReply = async (orderId, newRestaurantNote) => {
+  const handleUserReply = async (orderId, newRestaurantNote, newOrderTimeout) => {
     if (!userData?.id) {
-        console.error("User data is not available to send a reply.");
-        throw new Error("User not authenticated.");
-    }
-    const orderToUpdate = userOrders.find(o => o.orderId === orderId);
-    if (!orderToUpdate || !orderToUpdate.restaurantId) {
-        console.error("Order or restaurantId not found for reply:", orderId);
-        throw new Error("Order not found or incomplete data.");
-    }
-    try {
-        const orderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);
-        
-        // 2. Update the document with the new notes array
-        await updateDoc(orderRef, { 
-            restaurantNote: newRestaurantNote 
-        });
+          console.error("User data is not available to send a reply.");
+          throw new Error("User not authenticated.");
+      }
+      const orderToUpdate = userOrders.find(o => o.orderId === orderId);
+      if (!orderToUpdate || !orderToUpdate.restaurantId) {
+          console.error("Order or restaurantId not found for reply:", orderId);
+          throw new Error("Order not found or incomplete data.");
+      }
 
-        // 3. Immediately reflect the change in the local state (userOrders)
-        setUserOrders(prev => 
-            prev.map(o => o.orderId === orderId ? { ...o, restaurantNote: newRestaurantNote } : o)
-        );
-    } catch (error) {
-        console.error("Error sending user reply:", error);
-        // Rethrow the error so the child component can handle the local alert/saving state cleanup
-        throw new Error("Failed to send reply to the restaurant."); 
-    }
+      // 1. Convert the plain object to a Firestore Timestamp
+      const dbTimeout = new Timestamp(newOrderTimeout.seconds, newOrderTimeout.nanoseconds);
+      
+      try {
+          const orderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);
+          
+          // 2. Update the document with the new notes array AND the new orderTimeout
+          await updateDoc(orderRef, { 
+              restaurantNote: newRestaurantNote,
+              orderTimeout: dbTimeout // <-- FIX 1: Update DB timeout
+          });
+
+          // 3. Immediately reflect the change in the local state (userOrders)
+          setUserOrders(prev => 
+              prev.map(o => 
+                  o.orderId === orderId 
+                      ? { 
+                            ...o, 
+                            restaurantNote: newRestaurantNote, 
+                            orderTimeout: dbTimeout // <-- FIX 2: Update local state timeout
+                        } 
+                      : o
+              )
+          );
+      } catch (error) {
+          console.error("Error sending user reply:", error);
+          throw new Error("Failed to send reply to the restaurant."); 
+      }
   };
 
   if (loading || fetchingUser) return <div>Loading...</div>;
@@ -481,6 +493,7 @@ export default function UserPage() {
           userOrders={userOrders}
           handleUserReply={handleUserReply}
           userId={userData?.id}
+          userName={userData.name}
         />}
 
         {activeTab === "settings" && (

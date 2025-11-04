@@ -24,6 +24,16 @@ export default function OrdersTab({
     order.restaurantNote[0].trim() !== "";
   };
 
+  const formatOrderTimeout = (timeout) => {
+    if (timeout && typeof timeout.toDate === 'function') {
+        const date = timeout.toDate();
+        if (date.getTime() > Date.now()) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit'});
+        }
+    }
+    return "Expired";
+  };
+
   // 3. RESTAURANT MANAGER CLICKS REPLY: Update array and extend timeout
   const handleReply = async (orderId, replyContent) => {
       if (!replyContent.trim()) {
@@ -38,7 +48,7 @@ export default function OrdersTab({
 
       try {
           const orderRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
-          const managerNote = `Manager Reply (${new Date().toLocaleTimeString()}): ${replyContent.trim()}`;
+          const managerNote = `${restaurantData.storeName} (${new Date().toLocaleTimeString()}): ${replyContent.trim()}`;
           await updateDoc(orderRef, {
               orderTimeout: newOrderTimeout,
               // Use the target order's notes if found, otherwise an empty array
@@ -93,15 +103,13 @@ export default function OrdersTab({
                 let noteClass = 'bg-gray-100 border-gray-300 text-gray-800'; // Default
                 let displayNote = noteContent;
 
-                if (noteContent.startsWith("Manager Reply")) {
+                if (noteContent.startsWith(`${restaurantData.storeName}`)) {
                     noteClass = 'bg-red-100 border-red-300 text-red-800'; 
-                } else if (noteContent.startsWith("Customer Reply")) {
-                    noteClass = 'bg-blue-100 border-blue-300 text-blue-800'; 
                 } else if (noteIdx === 0 && order.orderConfirmed !== true) {
-                    const timeString = new Date(order.createdAt?.toDate()).toLocaleTimeString();
-                    displayNote = `Customer original message (${timeString}): ${noteContent}`;
-                    noteClass = 'bg-blue-100 border-blue-300 text-blue-800'; // Blue like other customer messages
-                }
+                    displayNote = `Order Instructions: ${noteContent}`;
+                    noteClass = "bg-gray-100 border-gray-300 text-gray-800"; 
+                } else
+                    noteClass = 'bg-blue-100 border-blue-300 text-blue-800';
                 
                 return (
                     <li 
@@ -139,67 +147,83 @@ export default function OrdersTab({
           </p>
         ) : (
           <div className="space-y-4">
-            {pendingOrders.map((order) => (
-              <div
-                key={order.orderId}
-                className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm"
-              >
-                <p className="text-sm text-gray-600"><strong>Order ID:</strong> {order.orderId}</p>
-                <p>
-                  <strong>Status:</strong>{" "}
-                  <span className="font-medium text-red-600">{order.deliveryStatus}</span>
-                </p>
-                <p className="mb-2">
-                  <strong>Order Placed:</strong>{" "}
-                  {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleString() : "N/A"}
-                </p>
-                
-                <OrderItemDetails order={order} />
-                
-                {/* Conditional Buttons: ONLY show for unhandled orders */}
-                {order.orderConfirmed == null && (
-                  <div className="mt-4 flex flex-col space-y-3">
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => handleConfirmOrder(order.orderId)}
-                        className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium transition-colors w-full"
-                      >
-                        ✅ Accept Order
-                      </button>
-                      <button
-                        onClick={() => handleRejectOrder(order.orderId)}
-                        className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium transition-colors w-full"
-                      >
-                        ❌ Reject
-                      </button>
+            {pendingOrders.map((order) => {
+              const timeoutDisplay = formatOrderTimeout(order.orderTimeout);
+                return (
+                  <div
+                    key={order.orderId}
+                    className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-grow pr-4"> 
+                        <p className="mb-2"><strong>Order ID:</strong> {order.orderId}</p>
+                        <p><strong>Status:</strong>{" "}<span className="font-medium text-red-600">{order.deliveryStatus}</span></p>
+                        <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                        <OrderItemDetails order={order} />
+                      </div>
+
+                      {/* --- TIME BANNER --- */}
+                      <div className="bg-yellow-400 text-yellow-900 text-med font-bold py-2 px-3 rounded-tr rounded-bl shadow-md z-10 -mt-4 -mr-4">
+                        <div className="text-gray-800 font-normal mb-1">
+                          <strong>Placed:</strong>{" "}
+                          {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleTimeString() : "N/A"}
+                        </div>
+                        {timeoutDisplay !== "Expired" ? (
+                          <div>
+                            Expires: {timeoutDisplay}
+                          </div>
+                        ) : (
+                              <div>
+                                  Expired
+                              </div>
+                        )}
+                      </div>
                     </div>
-                    
-                    {/* Reply Area: Show if the first note element is not empty */}
-                    {hasCustomerNote(order) && (
-                        <div className="mt-2 pt-2 border-t border-gray-300">
-                            <strong className="block mb-1 text-sm text-blue-700">Message to Customer:</strong>
-                            <textarea
-                                value={replyText[order.orderId] || ''}
-                            onChange={(e) => setReplyText({ ...replyText, [order.orderId]: e.target.value })}
-                            className="w-full p-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-800"
-                            rows="3"
-                            placeholder="Enter a reply to the customer..."
-                          />
-                          {/* Conditional Reply Button */}
-                          <button
-                          onClick={() => handleReply(order.orderId, replyText[order.orderId])}
-                          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium transition-colors w-full mt-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                          // Button is disabled if the reply text is empty or just whitespace
-                          disabled={!replyText[order.orderId] || replyText[order.orderId].trim() === ''}
-                        >
-                          Send Reply
-                        </button>
+                    {/* Conditional Wrapper: ONLY show for unhandled orders */}
+                    {order.orderConfirmed == null && (
+                      <div className="mt-4 flex flex-col space-y-3">
+                          {hasCustomerNote(order) && (
+                              <div className="mt-2 pt-2 border-t border-gray-300">
+                                  <strong className="mb-2 block">Message to Customer:</strong>
+                                  <textarea
+                                      value={replyText[order.orderId] || ''}
+                                      onChange={(e) => setReplyText({ ...replyText, [order.orderId]: e.target.value })}
+                                      className="w-full p-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                                      rows="3"
+                                      placeholder="Enter a reply to the customer..."
+                                  />
+                              </div>
+                          )}
+                          <div className={`grid gap-3 ${hasCustomerNote(order) ? 'mt-3 sm:grid-cols-3' : 'mt-3 sm:grid-cols-2'}`}>
+                              {/* Conditional Reply Button */}
+                              {hasCustomerNote(order) && (
+                                  <button
+                                      onClick={() => handleReply(order.orderId, replyText[order.orderId])}
+                                      className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm w-full"
+                                      disabled={!replyText[order.orderId] || replyText[order.orderId].trim() === ''}
+                                  >
+                                      Send
+                                  </button>
+                              )}
+                              
+                              <button
+                                  onClick={() => handleConfirmOrder(order.orderId)}
+                                  className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium transition-colors w-full"
+                              >
+                                  ✅ Accept Order
+                              </button>
+                              <button
+                                  onClick={() => handleRejectOrder(order.orderId)}
+                                  className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium transition-colors w-full"
+                              >
+                                  ❌ Reject
+                              </button>
+                          </div>
+
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
+                );
+            })}
           </div>
         )}
       </div>
@@ -223,7 +247,7 @@ export default function OrdersTab({
                 key={order.orderId}
                 className="border-2 rounded p-4 bg-green-50 border-green-500 text-gray-800 shadow-md"
               >
-                <p className="text-sm text-gray-600"><strong>Order ID:</strong> {order.orderId}</p>
+                <p className="mb-2"><strong>Order ID:</strong> {order.orderId}</p>
                 <p>
                   <strong>Status:</strong>{" "}
                   <span className="font-medium text-green-700">
