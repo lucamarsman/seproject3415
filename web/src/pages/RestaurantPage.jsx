@@ -13,6 +13,7 @@ import {
   updateDoc,
   onSnapshot,
   serverTimestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
@@ -78,7 +79,6 @@ export default function RestaurantPage() {
               const docSnap = await getDoc(docRef);
 
               if (docSnap.exists() && Array.isArray(docSnap.data().typeIcons)) {
-                  // Map the array to just the 'type' string (e.g., ["Pizza", "Sushi"])
                   const types = docSnap.data().typeIcons
                       .map(item => item.type)
                       .filter(type => type);
@@ -93,9 +93,8 @@ export default function RestaurantPage() {
               setLoadingTypes(false);
           }
       };
-
       fetchCuisineTypes();
-  }, []); // Runs once on mount
+  }, []);
 
 
   useEffect(() => {
@@ -104,13 +103,12 @@ export default function RestaurantPage() {
         const parsed = parseHoursArray(restaurantData.hours);
         setHoursState(parsed);
     }
-    //parse type
     if (restaurantData.type) {
         setSelectedType(restaurantData.type);
     } else if (cuisineTypes.length > 0) {
         setSelectedType(cuisineTypes[0]);
     }
-}, [restaurantData, cuisineTypes]);
+  }, [restaurantData, cuisineTypes]);
 
   // Fetch or create restaurant based on logged-in user
   useEffect(() => {
@@ -187,59 +185,213 @@ export default function RestaurantPage() {
     ordersRef.current = orders; 
   }, [orders]); 
 
-  // --- Realtime listener and Interval Logic ---
+  // Realtime listener. UPDATES: orderConfirmed, estimatedPickUpTime, estimatedPreppedTime
   useEffect(() => {
     if (!restaurantData?.id) return;
+
+    // GET ALL ORDERS IN RESTAURANT
     const ordersCollectionRef = collection(
-      db,
-      "restaurants",
-      restaurantData.id,
-      "restaurantOrders"
+        db,
+        "restaurants",
+        restaurantData.id,
+        "restaurantOrders"
     );
     let firstLoad = true; 
 
-    // processOrders is now an ACTION function
+    // PROCESSING FUNCTION
     const processOrders = async (ordersArray) => {
-        const now = new Date();
-        const timedOutOrders = ordersArray.filter((order) => {
-            // Only process orders that are PENDING (orderConfirmed === null)
-            const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
-            const shouldReject = timeout && order.orderConfirmed === null && timeout < now;
-            if (shouldReject) {
-                console.log(`!!! Order ${order.orderId} is TIMED OUT.`);
-            }
-            return shouldReject;
-        });
+    // 1. COURIER TRACKING AND ETA CALCULATION
+    const activeOrders = ordersArray.filter(
+        (order) => 
+            order.courierConfirmed === true && // Courier confirmed pickup
+            order.courierId && // Courier is assigned
+            order.restaurantLocation && // Must have restaurant location
+            order.deliveryStatus !== "Delivered" && 
+            order.deliveryStatus !== "Delivery enroute" 
+    );
 
-        if (timedOutOrders.length === 0) return;
+    if (activeOrders.length > 0) {
+        const uniqueCourierIds = new Set(activeOrders.map(order => order.courierId));
+        const courierDataMap = new Map();
+        const updateBatch = writeBatch(db);
+        const localUpdates = [];
 
-        // 1. Run the atomic update for all timed-out orders
-        const rejectionResults = await Promise.all(
-            timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
+        // Fetch all unique courier locations in parallel
+        await Promise.all(
+            Array.from(uniqueCourierIds).map(async (courierId) => {
+                const courierDocRef = doc(db, "couriers", courierId); 
+                try {
+                    const courierSnap = await getDoc(courierDocRef);
+                    if (courierSnap.exists()) {
+                        courierDataMap.set(courierId, courierSnap.data());
+                    }
+                } catch (err) {
+                    console.error(`Error fetching courier ${courierId}:`, err);
+                }
+            })
         );
         
-        // 2. Update local state for all successful rejections
-        const successfullyRejectedIds = timedOutOrders
-            .filter((_, index) => rejectionResults[index].success)
-            .map(order => order.orderId);
+        // Loop through active orders to calculate ETA
+        for (const order of activeOrders) {
+            const courier = courierDataMap.get(order.courierId);
+            
+            // --- Data Preparation and Validation ---
+            
+            const now = new Date();
+            let preppedDate = null;
+            let remainingPrepDurationMinutes = 0;
 
-        if (successfullyRejectedIds.length > 0) {
-            setOrders(prevOrders => {
-                return prevOrders.map(order => {
-                    // If this order was successfully rejected, update its status locally
-                    if (successfullyRejectedIds.includes(order.orderId)) {
-                        console.log(`[Local Update] Rejected order ${order.orderId} status updated.`);
-                        return {
-                            ...order,
-                            orderConfirmed: false,
-                            deliveryStatus: "Auto-rejected: Order timed out."
-                        };
-                    }
-                    return order;
-                });
+            if (order.estimatedPreppedTime && typeof order.estimatedPreppedTime.toDate === 'function') {
+                preppedDate = order.estimatedPreppedTime.toDate();
+                // Calculate the difference in milliseconds and convert to minutes
+                remainingPrepDurationMinutes = Math.max(0, Math.round((preppedDate.getTime() - now.getTime()) / 60000));
+            }
+
+            const courierLoc = courier?.location;
+            const restaurantLoc = order.restaurantLocation;
+            const userLoc = order.userLocation;
+            
+            // Use safe access for coordinates in validation
+            const locationValid = (
+                courierLoc && typeof courierLoc._lat === 'number' && typeof courierLoc._long === 'number' &&
+                restaurantLoc && typeof restaurantLoc._lat === 'number' && typeof restaurantLoc._long === 'number' &&
+                userLoc && typeof userLoc.latitude === 'number' && typeof userLoc.longitude === 'number'
+            );
+            
+            let C_R_distanceKm = 0;
+            let R_U_distanceKm = 0;
+            let courier_R_EtaMinutes = NaN;
+            let courier_U_EtaMinutes = NaN;
+            
+            let estimatedPickUpTimeTimestamp = null;
+            let estimatedDeliveryTimeTimestamp = null;
+            let newDeliveryStatus;
+
+            if (locationValid) {
+                // 1. DISTANCE CALCULATION
+                C_R_distanceKm = getDistanceInKm(courierLoc._lat, courierLoc._long, restaurantLoc._lat, restaurantLoc._long);
+                R_U_distanceKm = getDistanceInKm(restaurantLoc._lat, restaurantLoc._long, userLoc.latitude, userLoc.longitude);
+
+                // 2. COURIER ETA DURATION CALCULATION (from now)
+                const COURIER_SPEED_KMH = 60;
+                const R_travelTimeMinutes = (C_R_distanceKm / COURIER_SPEED_KMH) * 60;
+                courier_R_EtaMinutes = Math.max(1, Math.round(R_travelTimeMinutes)); // Courier R_ETA Duration from now
+                const U_travelTimeMinutes = (R_U_distanceKm / COURIER_SPEED_KMH) * 60;
+                const R_U_courierTime = Math.max(1, Math.round(U_travelTimeMinutes)); // R -> U Travel Duration
+                
+                // 3. CALCULATE ESTIMATED PICKUP TIME (TIMESTAMP)
+                const courierArrivalDate = new Date(now.getTime() + courier_R_EtaMinutes * 60000);
+                let estimatedPickUpDate;
+                if (courierArrivalDate.getTime() > preppedDate.getTime()) {
+                    estimatedPickUpDate = courierArrivalDate;
+                } else {
+                    estimatedPickUpDate = preppedDate;
+                }
+                estimatedPickUpTimeTimestamp = Timestamp.fromDate(courierArrivalDate);
+
+                // 4. CALCULATE ESTIMATED DELIVERY TIME (TIMESTAMP)
+                const estimatedDeliveryDate = new Date(estimatedPickUpDate.getTime() + R_U_courierTime * 60000);
+                estimatedDeliveryTimeTimestamp = Timestamp.fromDate(estimatedDeliveryDate);                
+                courier_U_EtaMinutes = Math.round((estimatedDeliveryDate.getTime() - now.getTime()) / 60000);
+
+                // 6. SIMPLIFIED STATUS MESSAGE
+                console.log("Delivery Status updated");
+                newDeliveryStatus = "Awaiting courier pick-up."
+                /*
+                newDeliveryStatus = `
+                    Courier to Restaurant: **${C_R_distanceKm.toFixed(1)} km** (ETA: ${courier_R_EtaMinutes} min). 
+                    Delivery to User: **${R_U_distanceKm.toFixed(1)} km**. Total ETA to User: **${courier_U_EtaMinutes} min**.
+                    Food Ready Time (Remaining): **${remainingPrepDurationMinutes} min**.
+                `;*/
+
+            } else {
+                // Fallback status if location data is incomplete
+                newDeliveryStatus = `Courier assigned, but location data is temporarily unavailable. Food Ready Time (Remaining): **${remainingPrepDurationMinutes} min**.`;
+                console.warn(`Location data invalid for order ${order.orderId}. Cannot calculate distance.`);
+            }
+
+            // Add update to the batch
+            const orderRef = doc(
+                db,
+                "restaurants",
+                restaurantData.id,
+                "restaurantOrders",
+                order.orderId
+            );
+            
+            // Update the order document
+            updateBatch.update(orderRef, {
+                deliveryStatus: newDeliveryStatus,
+                courier_R_Distance: C_R_distanceKm, 
+                courier_R_EtaMinutes: courier_R_EtaMinutes,
+                estimatedPickUpTime: estimatedPickUpTimeTimestamp, // Timestamp
+                courier_U_Distance: R_U_distanceKm, 
+                courier_U_EtaMinutes: courier_U_EtaMinutes,
+                estimatedDeliveryTime: estimatedDeliveryTimeTimestamp, // Timestamp
+                courierLat: courierLoc?._lat || null, 
+                courierLng: courierLoc?._long || null, 
+            });
+
+            // Prepare local state update
+            localUpdates.push({
+                orderId: order.orderId,
+                deliveryStatus: newDeliveryStatus,
             });
         }
-    };
+
+        // Commit the batch updates to Firestore
+        if (localUpdates.length > 0) {
+            try {
+                await updateBatch.commit();
+                setOrders(prevOrders => prevOrders.map(order => {
+                    const update = localUpdates.find(u => u.orderId === order.orderId);
+                    return update ? { ...order, deliveryStatus: update.deliveryStatus } : order;
+                }));
+            } catch (error) {
+                console.error("Batch ETA update failed:", error);
+            }
+        }
+    }
+    
+    // --- 2. EXISTING TIMEOUT REJECTION LOGIC (unchanged) ---
+    const now = new Date();
+    const timedOutOrders = ordersArray.filter((order) => {
+        const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
+        const shouldReject = timeout && order.orderConfirmed === null && timeout < now;
+        if (shouldReject) {
+            console.log(`!!! Order ${order.orderId} is TIMED OUT.`);
+        }
+        return shouldReject;
+    });
+
+    if (timedOutOrders.length === 0) return;
+
+    // 1. Run the atomic update for all timed-out orders
+    const rejectionResults = await Promise.all(
+        timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
+    );
+    
+    // 2. Update local state for all successful rejections
+    const successfullyRejectedIds = timedOutOrders
+        .filter((_, index) => rejectionResults[index].success)
+        .map(order => order.orderId);
+
+    if (successfullyRejectedIds.length > 0) {
+        setOrders(prevOrders => {
+            return prevOrders.map(order => {
+                if (successfullyRejectedIds.includes(order.orderId)) {
+                    console.log(`[Local Update] Rejected order ${order.orderId} status updated.`);
+                    return {
+                        ...order,
+                        orderConfirmed: false,
+                        deliveryStatus: "Auto-rejected: Order timed out."
+                    };
+                }
+                return order;
+            });
+        });
+    }
+  };
 
     // 1️⃣ REAL-TIME LISTENER: Updates the UI/local state (setOrders) and manages loading
     const unsub = onSnapshot(
@@ -266,14 +418,13 @@ export default function RestaurantPage() {
         }
     );
 
-    // 2️⃣ INTERVAL: Triggers the action (auto-reject) every 5 seconds
+    // 2️⃣ INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
     const interval = setInterval(() => {
         const currentOrders = ordersRef.current; 
         if (currentOrders.length === 0) return;
         processOrders(currentOrders); 
     }, 5000); 
 
-    // Cleanup function
     return () => {
         unsub();
         clearInterval(interval);
@@ -282,60 +433,78 @@ export default function RestaurantPage() {
 
   const handleConfirmOrder = async (orderId) => {
     try {
-      const orderDocRef = doc(
-        db,
-        "restaurants",
-        restaurantData.id,
-        "restaurantOrders",
-        orderId
-      );
+        const orderDocRef = doc(
+            db,
+            "restaurants",
+            restaurantData.id,
+            "restaurantOrders",
+            orderId
+        );
 
-      // Get restaurant’s location
-      const restLat = restaurantData.location.latitude;
-      const restLng = restaurantData.location.longitude;
-
-      // Fetch all couriers (or better, a filtered subset)
-      const couriersCol = collection(db, "couriers");
-      const couriersSnap = await getDocs(couriersCol);
-
-      const courierArray = [];
-
-      couriersSnap.forEach((courierDoc) => {
-        const cData = courierDoc.data();
-        if (cData.location && typeof cData.location.latitude === "number") {
-          const cLat = cData.location.latitude;
-          const cLng = cData.location.longitude;
-
-          const distKm = getDistanceInKm(restLat, restLng, cLat, cLng);
-          if (distKm <= 50) {
-            courierArray.push(courierDoc.id);
-          }
+        // 1. PASSING CONFIRMED TIME + TOTALPREPTIME = ESTIMATE READY TIME TO ORDER DOC FOR BASE TIME OF ESTIMATED DELIVERY TIME
+        const orderSnap = await getDoc(orderDocRef);
+        if (!orderSnap.exists()) {
+            console.error("Order document not found:", orderId);
+            setError("Order not found.");
+            return;
         }
-      });
 
-      // Now update the order including courierArray
-      await updateDoc(orderDocRef, {
-        orderConfirmed: true,
-        deliveryStatus: "Confirmed, order being prepared.",
-        courierArray: courierArray,
-      });
+        const orderData = orderSnap.data();
+        const totalPrepTime = orderData.totalPrepTime || 0;
+        const currentTime = new Date();
+        const confirmedTime = Timestamp.fromDate(currentTime);
+        const estimatedTimeDate = new Date(currentTime.getTime());
+        estimatedTimeDate.setMinutes(currentTime.getMinutes() + totalPrepTime);
+        const estimatedPreppedTime = Timestamp.fromDate(estimatedTimeDate);
 
-      // Update local state
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.orderId === orderId
-            ? {
-                ...o,
-                orderConfirmed: true,
-                deliveryStatus: "Confirmed, order being prepared.",
-                courierArray: courierArray,
-              }
-            : o
-        )
-      );
+        //2. BUILD THE COURIER ARRAY (this should be updated)
+        const restLat = restaurantData.location.latitude;
+        const restLng = restaurantData.location.longitude;
+        const couriersCol = collection(db, "couriers");
+        const couriersSnap = await getDocs(couriersCol);
+        const courierArray = [];
+
+        couriersSnap.forEach((courierDoc) => {
+          const cData = courierDoc.data();
+          if (cData.location && typeof cData.location.latitude === "number") {
+            const cLat = cData.location.latitude;
+            const cLng = cData.location.longitude;
+
+            const distKm = getDistanceInKm(restLat, restLng, cLat, cLng);
+            if (distKm <= 50) {
+              courierArray.push(courierDoc.id);
+            }
+          }
+        });
+
+        // --- 3. UPDATE ORDER IN FIRESTORE ---
+        await updateDoc(orderDocRef, {
+            orderConfirmed: true,
+            deliveryStatus: "Confirmed, order being prepared.",
+            courierArray: courierArray,
+            confirmedTime: confirmedTime,
+            estimatedPreppedTime: estimatedPreppedTime,
+        });
+
+        //
+
+        setOrders((prev) =>
+            prev.map((o) =>
+                o.orderId === orderId
+                    ? {
+                        ...o,
+                        orderConfirmed: true,
+                        deliveryStatus: "Confirmed, order being prepared.",
+                        courierArray: courierArray,
+                        confirmedTime: confirmedTime,
+                        estimatedPreppedTime: estimatedPreppedTime,
+                      }
+                    : o
+            )
+        );
     } catch (err) {
-      console.error("Error confirming order:", err);
-      setError("Failed to confirm order.");
+        console.error("Error confirming order:", err);
+        setError("Failed to confirm order.");
     }
   };
 
@@ -344,7 +513,7 @@ export default function RestaurantPage() {
     const orderDocRef = doc(
         db,
         "restaurants",
-        restaurantData.id, // Assuming restaurantData is in scope
+        restaurantData.id,
         "restaurantOrders",
         orderId
     );
@@ -359,7 +528,7 @@ export default function RestaurantPage() {
         }
 
         const orderData = orderSnapshot.data();
-        const userId = orderData.userId; // <-- Extracted the userId!
+        const userId = orderData.userId;
 
         if (!userId) {
             console.error(`userId not found on order ${orderId}. Cannot notify customer.`);
@@ -407,35 +576,26 @@ export default function RestaurantPage() {
     }
   };
 
+  /* AUTO ACCEPT AND REJECT ORDER */
   const handledOrders = useRef(new Set());
-
   useEffect(() => {
     if (!restaurantData?.id || orders.length === 0) return;
 
-    // Only unhandled orders that haven't been processed yet
     const unhandled = orders.filter(
       o => o.orderConfirmed == null && !handledOrders.current.has(o.orderId)
     );
     if (unhandled.length === 0) return;
-
-    /* AUTO ACCEPT AND REJECT */
     if (settings.autoSetting === "accept") {
-      console.log(`⚡ Auto Accept enabled — checking ${unhandled.length} order(s)...`);
       for (const order of unhandled) {
-        const requiresManualReview = order.restaurantNote && order.restaurantNote.trim() !== "";
-        if (requiresManualReview) {
+        if (order.restaurantNote.length > 0) {
           console.log(`⚠️ Order ${order.orderId} skipped auto-accept due to special customer note. Manual review required.`);
         } else {
-          console.log(`✅ Auto-confirming order ${order.orderId}`);
           handledOrders.current.add(order.orderId);
           handleConfirmOrder(order.orderId);
         }
       }
     } else if (settings.autoSetting === "reject") {
-      console.log(`⚡ Auto Reject enabled — rejecting ${unhandled.length} order(s)...`);
       for (const order of unhandled) {
-        // Auto-reject is generally always enforced, regardless of a note, 
-        // as the restaurant isn't accepting orders anyway.
         handledOrders.current.add(order.orderId);
         handleRejectOrder(order.orderId);
       }

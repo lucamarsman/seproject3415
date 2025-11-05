@@ -13,8 +13,16 @@ export default function OrdersTab({
     const [replyText, setReplyText] = useState({});
     // State to manage loading state (e.g., while saving to Firestore)
     const [isSaving, setIsSaving] = useState({});
+    
+    // --- FORMATTING FUNCTIONS ---
+    const formatEstimatedTime = (date) => {
+        if (date instanceof Date && !isNaN(date)) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return "TBD";
+    };
 
-    // 2. Local Reply Handler
+    // 2. Local Reply Handler (Logic remains the same)
     const handleLocalReply = async (orderId, currentNotes, replyContent) => {
         const trimmedReply = replyContent.trim();
         if (!trimmedReply) {
@@ -26,8 +34,9 @@ export default function OrdersTab({
         
         // --- TIMEOUT LOGIC ---
         const newTimeoutMillis = Date.now() + REPLY_TIMEOUT_EXTENSION_MS;
-        const newOrderTimeout = { seconds: Math.floor(newTimeoutMillis / 1000), nanoseconds: 0 }; 
-        const isOriginalPost = currentNotes.length === 1;
+        const newOrderTimeout = Timestamp 
+            ? Timestamp.fromDate(new Date(newTimeoutMillis)) 
+            : { seconds: Math.floor(newTimeoutMillis / 1000), nanoseconds: 0 }; 
         const timeString = new Date().toLocaleTimeString();
         
         let userNote = `${userName} (${timeString}): ${trimmedReply}`;
@@ -58,32 +67,51 @@ export default function OrdersTab({
         <div className="space-y-4">
             {visible.map((order, index) => {
                 const orderId = order.orderId;
+                let estimatedPreppedTime = null;
+                let estimatedPickUpTime = null;
+                let estimatedDeliveryTime = null;
                 const saving = isSaving[orderId];
-                // Hide reply interface if order is confirmed 
                 const canReply = order.orderConfirmed !== true; 
-                
                 const containerClassName = order.orderConfirmed === true
                     ? "border-2 border-green-500 rounded p-4 bg-green-50 shadow-md"
                     : "border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm";
+                if (order.orderConfirmed === true) {
+                    estimatedPreppedTime = order.estimatedPreppedTime?.toDate() ?? null;
+                    estimatedPickUpTime = order.estimatedPickUpTime?.toDate() ?? null;
+                    estimatedDeliveryTime = order.estimatedDeliveryTime?.toDate() ?? null;
+                }
 
                 return (
-                    <div
-                        key={orderId || index}
+                    <div key={orderId || index}
                         className={containerClassName}
                     >
-                        {/* Order Details */}
-                        <h3 className="font-semibold text-lg mb-1">Order #{index + 1}</h3>
-                        <p><strong>Status:</strong> {order.deliveryStatus}</p>
-                        <p><strong>Restaurant:</strong> {order.fromRestaurant} <span className="mb-2">— {order.restaurantAddress}</span></p>
-                        <p><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
-                        <p><strong>Order Date:</strong> {order.createdAt?.toDate().toLocaleString()}</p>
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex-grow pr-4"> 
+                                <h3 className="font-semibold text-lg mb-1">Order #{index + 1}</h3>
+                                <p><strong>Status:</strong> {order.deliveryStatus}</p>
+                                <p><strong>Restaurant:</strong> {order.fromRestaurant} <span className="mb-2">— {order.restaurantAddress}</span></p>
+                                <p><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                                <p>
+                                    <strong>Estimated Prepped / Pickup / Delivery Time:</strong> 
+                                    <span className="font-medium text-blue-600"> {formatEstimatedTime(estimatedPreppedTime)} / {formatEstimatedTime(estimatedPickUpTime)} / {formatEstimatedTime(estimatedDeliveryTime)} </span>
+                                </p>
+                            </div>
+
+                            {/* --- TIME BANNER (TOP-RIGHT) --- */}
+                            <div className="bg-yellow-400 text-yellow-900 text-med font-bold py-2 px-3 rounded-tr rounded-bl shadow-md z-10 -mt-4 -mr-4">
+                                <div className="text-gray-800 font-normal mb-1">
+                                    <strong>Placed:</strong>{" "}
+                                    {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleTimeString() : "N/A"}
+                                </div>
+                            </div>
+                        </div> 
                         
                         {/* Items Section (Kept for completeness) */}
                         <div className="mt-4 pt-2 border-t border-gray-200">
                             <strong className="block mb-1 text-base">Items:</strong>
-                            <ul className="space-y-3">
+                            <ul className="ml-0 space-y-2 text-sm">
                                 {order.items?.map((item, idx) => (
-                                    <li key={idx} className="text-sm bg-white p-2 rounded border border-gray-100">
+                                    <li key={idx} className="py-1 px-2 border rounded bg-gray-50">
                                         <p className="font-medium">{item.name} (<span className="text-grey-600">x{item.quantity}</span>)</p>
                                         {(item.selectedMods && item.selectedMods.length > 0) && (
                                             <ul className="list-disc list-inside ml-4 text-xs text-gray-700 mt-1">
@@ -103,7 +131,7 @@ export default function OrdersTab({
                         {/* Order Notes / Messages Section */}
                         {Array.isArray(order.restaurantNote) && order.restaurantNote.length > 0 && (
                             <div className="mt-4 pt-2 border-t border-gray-200">
-                                <strong className="block mb-1 text-base">Order Note: / Messages:</strong>
+                                <strong className="block mb-1 text-base">Order Note:</strong>
                                 <ul className="space-y-3">
                                     {order.restaurantNote.map((note, noteIdx) => {
                                         const noteContent = (note && typeof note === 'string') ? note.trim() : '';

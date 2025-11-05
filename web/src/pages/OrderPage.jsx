@@ -210,12 +210,11 @@ export default function OrderPage() {
         (sum, item) => sum + (item.prepTime || 0) * item.quantity,
         0
       );
-      const estimatedReadyDate = new Date();
-      estimatedReadyDate.setMinutes(estimatedReadyDate.getMinutes() + totalPrepTime);
+    
       const createdAt = Timestamp.now();
-      const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 15000);
+      const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 30000);
 
-      // Step 4: Construct the order document (UPDATED with global notes)
+      // Step 4: Construct the order document 
       const newOrder = {
         createdAt: createdAt,
         courierArray: [],
@@ -231,7 +230,10 @@ export default function OrderPage() {
         items,
         payment: total,
         totalPrepTime,
-        estimatedReadyTime: Timestamp.fromDate(estimatedReadyDate),
+        confirmedTime: null,
+        estimatedDeliveryTime: null,
+        estimatedPickUpTime: null,
+        estimatedPreppedTime: null,
         restaurantAddress: restaurant.address || "",
         restaurantLocation: restaurant.location,
         userAddress: userData.address,

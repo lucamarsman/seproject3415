@@ -190,7 +190,7 @@ export default function CourierPage() {
         locationQueue.current = { latitude, longitude };
 
         if (!throttleTimeout.current) {
-          throttleTimeout.current = setTimeout(throttleUpdate, 10000);
+          throttleTimeout.current = setTimeout(throttleUpdate, 5000);
         }
 
         // If location access was previously denied, reset error and flag
@@ -299,7 +299,6 @@ export default function CourierPage() {
 
       batch.update(orderDocRef, {
         courierConfirmed: true,
-        deliveryStatus: "Accepted by courier — picking up soon",
         courierId: courierData.courierId,
       });
 

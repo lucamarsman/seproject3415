@@ -94,7 +94,7 @@ export default function OrdersTab({
       {/* Display Global Order Notes */}
       {Array.isArray(order.restaurantNote) && order.restaurantNote.length > 0 && (
         <> 
-          <strong className="block mb-1 mt-4 text-base border-t pt-2">Order Notes:</strong>
+          <strong className="block mb-1 mt-4 text-base border-t pt-2">Order Note:</strong>
           <ul className="ml-0 space-y-2 text-sm">
             {order.restaurantNote.map((note, noteIdx) => {
                 const noteContent = (note && typeof note === 'string' && note.trim() !== "") ? note.trim() : null;
@@ -106,7 +106,7 @@ export default function OrdersTab({
                 if (noteContent.startsWith(`${restaurantData.storeName}`)) {
                     noteClass = 'bg-red-100 border-red-300 text-red-800'; 
                 } else if (noteIdx === 0 && order.orderConfirmed !== true) {
-                    displayNote = `Order Instructions: ${noteContent}`;
+                    displayNote = `${noteContent}`;
                     noteClass = "bg-gray-100 border-gray-300 text-gray-800"; 
                 } else
                     noteClass = 'bg-blue-100 border-blue-300 text-blue-800';
@@ -254,12 +254,7 @@ export default function OrdersTab({
                     {order.deliveryStatus}
                   </span>
                </p>
-                <p className="mb-2">
-                  <strong>Order Confirmed:</strong>{" "}
-                  {order.updatedAt?.toDate
-                    ? order.updatedAt.toDate().toLocaleString()
-                    : "N/A"}
-               </p>
+                <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
                 <OrderItemDetails order={order} />
               </div>
             ))}
