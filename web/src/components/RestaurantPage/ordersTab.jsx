@@ -9,6 +9,7 @@ export default function OrdersTab({
   loadingOrders,
   unhandledOrders,
   confirmedOrders,
+  courierConfirmedOrders,
   handleConfirmOrder,
   handleRejectOrder,
 }) {
@@ -24,6 +25,13 @@ export default function OrdersTab({
     order.restaurantNote[0].trim() !== "";
   };
 
+  const formatEstimatedTime = (date) => {
+        if (date instanceof Date && !isNaN(date)) {
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        return "TBD";
+    };
+
   const formatOrderTimeout = (timeout) => {
     if (timeout && typeof timeout.toDate === 'function') {
         const date = timeout.toDate();
@@ -34,7 +42,7 @@ export default function OrdersTab({
     return "Expired";
   };
 
-  // 3. RESTAURANT MANAGER CLICKS REPLY: Update array and extend timeout
+  // RESTAURANT MANAGER CLICKS REPLY: Update array and extend timeout
   const handleReply = async (orderId, replyContent) => {
       if (!replyContent.trim()) {
           alert("Please enter a reply before sending.");
@@ -45,22 +53,37 @@ export default function OrdersTab({
       
       // Look for the order in either array (pending or confirmed)
       const targetOrder = pendingOrders.find(o => o.orderId === orderId) || confirmedOrders.find(o => o.orderId === orderId);
-
       try {
           const orderRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
           const managerNote = `${restaurantData.storeName} (${new Date().toLocaleTimeString()}): ${replyContent.trim()}`;
           await updateDoc(orderRef, {
               orderTimeout: newOrderTimeout,
-              // Use the target order's notes if found, otherwise an empty array
               restaurantNote: [...(targetOrder?.restaurantNote || []), managerNote]
           });
           console.log(`Successfully extended orderTimeout for order: ${orderId} to ${new Date(newTimeoutMillis).toLocaleString()}`);
-          // Clear the local reply state after successful send
           setReplyText(prev => ({ ...prev, [orderId]: '' }));
-
       } catch (error) {
           console.error("Error sending reply or updating order timeout:", error);
           alert("Failed to send reply. Check console for details.");
+      }
+  };
+
+  // COURIER PICKUP / EXCHANGE FUNCTION
+  const handleCourierExchange = async (orderId) => {
+      if (!orderId) return;
+      if (!window.confirm("Confirm that the Grab N Go courier's courierId and orderId match?")) {
+          return;
+      }
+      try {
+          const orderRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
+          await updateDoc(orderRef, {
+              courierPickedUp: true,
+              deliveryStatus: "Delivery enroute.",
+          });
+            console.log(`Order ${orderId} updated: courierPickedUp=true, deliveryStatus="Delivery enroute."`);
+      } catch (error) {
+          console.error("Error updating order status upon courier pickup:", error);
+          alert("Failed to update order status. Check console for details.");
       }
   };
   
@@ -135,16 +158,11 @@ export default function OrdersTab({
 
       {/* --- NEW ORDERS AWAITING CONFIRMATION --- */}
       <div className="mt-6">
-        <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">
-          New Orders
-        </h3>
-
+        <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">New Orders</h3>
         {loadingOrders ? (
           <p>Loading orders…</p>
         ) : pendingOrders.length === 0 ? (
-          <p className="text-gray-500">
-            No new orders awaiting confirmation.
-          </p>
+          <p className="text-gray-500">No new orders awaiting confirmation.</p>
         ) : (
           <div className="space-y-4">
             {pendingOrders.map((order) => {
@@ -155,7 +173,6 @@ export default function OrdersTab({
                     className="border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex-grow pr-4"> 
-                        <p className="mb-2"><strong>Order ID:</strong> {order.orderId}</p>
                         <p><strong>Status:</strong>{" "}<span className="font-medium text-red-600">{order.deliveryStatus}</span></p>
                         <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
                         <OrderItemDetails order={order} />
@@ -228,12 +245,11 @@ export default function OrdersTab({
         )}
       </div>
 
-      {/* --- CONFIRMED ORDERS (IN PROGRESS) --- */}
+      {/* --- CONFIRMED BY RESTAURANT ORDERS --- */}
       <div className="mt-10">
         <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">
           Confirmed Orders
         </h3>
-
         {loadingOrders ? (
           <p>Loading confirmed orders…</p>
         ) : confirmedOrders.length === 0 ? (
@@ -247,7 +263,6 @@ export default function OrdersTab({
                 key={order.orderId}
                 className="border-2 rounded p-4 bg-green-50 border-green-500 text-gray-800 shadow-md"
               >
-                <p className="mb-2"><strong>Order ID:</strong> {order.orderId}</p>
                 <p>
                   <strong>Status:</strong>{" "}
                   <span className="font-medium text-green-700">
@@ -255,7 +270,61 @@ export default function OrdersTab({
                   </span>
                </p>
                 <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
-                <OrderItemDetails order={order} />
+                <div className="border-b pb-2 mb-3"> 
+                  <OrderItemDetails order={order} />
+                </div>
+                <div className="flex justify-start items-center mb-2 gap-8 w-full"> 
+                  <p className="w-1/2"><strong>Order ID: </strong>{order.orderId}</p>
+                  <p className="w-1/2"><strong>Prep Goal: </strong>{formatEstimatedTime(order.estimatedPreppedTime?.toDate())}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* --- COURIER CONFIRMED ORDERS --- */}
+      <div className="mt-10">
+        <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">
+          Courier Confirmed Orders
+        </h3>
+        {loadingOrders ? (
+          <p>Loading courier confirmed orders…</p>
+        ) : courierConfirmedOrders.length === 0 ? (
+          <p className="text-gray-500">
+            No orders are currently confirmed by a courier.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {courierConfirmedOrders.map((order) => (
+              <div
+                key={order.orderId}
+                className="border-2 rounded p-4 bg-green-50 border-green-500 text-gray-800 shadow-md"
+              >
+                <p>
+                  <strong>Status:</strong>{" "}
+                  <span className="font-medium text-green-700">
+                    {order.deliveryStatus}
+                  </span>
+               </p>
+                <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                <div className="border-b pb-2 mb-3"> 
+                  <OrderItemDetails order={order} />
+                </div>
+                <div className="flex justify-start items-center mb-2 gap-8 w-full"> 
+                  <p className="w-1/2"><strong>Order ID: </strong>{order.orderId}</p>
+                  <p className="w-1/2"><strong>Prep Goal: </strong>{formatEstimatedTime(order.estimatedPreppedTime?.toDate())}</p>
+                </div>
+                <div className="flex justify-start items-center mb-2 gap-8 w-full"> 
+                  <p className="w-1/2"><strong>Courier ID: </strong>{order.courierId}</p>
+                  <p className="w-1/2"><strong>Arriving: </strong>{formatEstimatedTime(order.estimatedPickUpTime?.toDate())}</p>
+                </div>
+                <button
+                    onClick={() => handleCourierExchange(order.orderId)}
+                    className="mt-3 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+                >
+                    Courier Exchange
+                </button>
               </div>
             ))}
           </div>

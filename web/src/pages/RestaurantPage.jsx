@@ -200,14 +200,13 @@ export default function RestaurantPage() {
 
     // PROCESSING FUNCTION
     const processOrders = async (ordersArray) => {
-    // 1. COURIER TRACKING AND ETA CALCULATION
+    // 1. COURIER TRACKING AND ETA CALCULATION (activeOrders only)
     const activeOrders = ordersArray.filter(
         (order) => 
-            order.courierConfirmed === true && // Courier confirmed pickup
-            order.courierId && // Courier is assigned
-            order.restaurantLocation && // Must have restaurant location
-            order.deliveryStatus !== "Delivered" && 
-            order.deliveryStatus !== "Delivery enroute" 
+            order.courierConfirmed === true &&
+            order.courierId &&
+            order.restaurantLocation &&
+            order.courierPickedUp === false
     );
 
     if (activeOrders.length > 0) {
@@ -234,9 +233,7 @@ export default function RestaurantPage() {
         // Loop through active orders to calculate ETA
         for (const order of activeOrders) {
             const courier = courierDataMap.get(order.courierId);
-            
-            // --- Data Preparation and Validation ---
-            
+
             const now = new Date();
             let preppedDate = null;
             let remainingPrepDurationMinutes = 0;
@@ -613,8 +610,8 @@ export default function RestaurantPage() {
     );
   
   const unhandledOrders = orders.filter(order => order.orderConfirmed == null);
-  const rejectedOrders = orders.filter(order => order.orderConfirmed === false);
-  const confirmedOrders = orders.filter(order => order.orderConfirmed === true);
+  const confirmedOrders = orders.filter(order => order.orderConfirmed === true && order.courierConfirmed === false);
+  const courierConfirmedOrders = orders.filter(order => order.courierConfirmed === true && order.courierPickedUp === false);
   const pendingCount = unhandledOrders.length;
 
 return (
@@ -820,13 +817,13 @@ return (
               loadingOrders={loadingOrders}
               unhandledOrders={unhandledOrders}
               confirmedOrders={confirmedOrders}
+              courierConfirmedOrders={courierConfirmedOrders}
               handleConfirmOrder={handleConfirmOrder}
               handleRejectOrder={handleRejectOrder}
           />
       )}
       {/* 4. Order History Tab (activeTab === "orderHistory") 
-      This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager
-      C. Courier picked-up
+      This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager && C. Courier picked-up
       */}
       {activeTab === "orderHistory" && (
         <OrderHistoryTab

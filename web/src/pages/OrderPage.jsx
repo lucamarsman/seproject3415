@@ -220,6 +220,7 @@ export default function OrderPage() {
         courierArray: [],
         courierRejectArray: [],
         courierConfirmed: false,
+        courierPickedUp: false,
         courierId: "",
         orderTimeout: orderTimeout,
         deliveryStatus: "Awaiting restaurant confirmation.",
