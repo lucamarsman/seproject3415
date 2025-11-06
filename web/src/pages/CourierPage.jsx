@@ -11,7 +11,10 @@ import {
   updateDoc,
   doc,
   writeBatch,
+  Timestamp,
 } from "firebase/firestore";
+import { calculateEtaCourier } from '../utils/calculateEtaCourier';
+import { coordinateFormat } from '../utils/coordinateFormat';
 
 export default function CourierPage() {
   const [user, setUser] = useState(null);
@@ -23,26 +26,38 @@ export default function CourierPage() {
   const [orders, setOrders] = useState([]);
   const [fetchingOrders, setFetchingOrders] = useState(true);
   const [currentTask, setCurrentTask] = useState(null);
-  const locationQueue = useRef(null);
-  const throttleTimeout = useRef(null);
   const courierDataRef = useRef(courierData);
+  const currentTaskRef = useRef(currentTask);
 
   useEffect(() => {
     courierDataRef.current = courierData;
   }, [courierData]);
 
+  useEffect(() => {
+    currentTaskRef.current = currentTask;
+  }, [currentTask]);
+
   // Helper: Update courier status in Firestore and state
-  const updateCourierStatus = async (status) => {
-    if (!courierData?.id) return;
-    const courierDocRef = doc(db, "couriers", courierData.id);
-    try {
-      await updateDoc(courierDocRef, { status });
-      setCourierData((prev) => ({ ...prev, status }));
-    } catch (err) {
-      console.error("Failed to update status:", err);
-      setError("Failed to update status.");
+  const updateCourierDoc = async (updates) => {
+    const currentCourierId = courierDataRef.current?.id;
+    if (!currentCourierId) return;
+
+    if (updates.location) {
+        updates.location = new GeoPoint(updates.location.latitude, updates.location.longitude);
     }
-  };
+
+    const courierDocRef = doc(db, "couriers", currentCourierId);
+    try {
+        await updateDoc(courierDocRef, updates);
+        
+        setCourierData((prev) => ({ ...prev, ...updates })); 
+    } catch (err) {
+        console.error("Failed to update courier document:", err);
+        if (updates.status) {
+             setError(`Failed to update status to ${updates.status}.`);
+        }
+    }
+};
 
   // Helper: Returns a user-friendly location error message based on code
   const getLocationErrorMessage = (code) => {
@@ -66,6 +81,7 @@ export default function CourierPage() {
     return unsubscribe;
   }, []);
 
+  // 1. Initial Fetch/Create Courier Logic (unchanged for brevity, but needed)
   useEffect(() => {
     if (!user) return;
 
@@ -143,87 +159,118 @@ export default function CourierPage() {
     fetchOrCreateCourier();
   }, [user]);
 
-  // Throttled location tracking
-  useEffect(() => {
-    if (!courierData?.id) return;
+  // Helper: Update Order Task ETA
+  const updateCourierTask = async (latestFormattedLocation) => {
+    const task = currentTaskRef.current;
+    const courier = courierDataRef.current;
+    
+    const courierLocation = latestFormattedLocation; 
+    
+    if (!task || !courier || !courierLocation || task.orderCompleted) {
+      return;
+    }
 
-    const courierDocRef = doc(db, "couriers", courierData.id);
+    const userLoc = task.userLocation;
+    const now = new Date();
+    
+    const formattedCourierLoc = courierLocation; 
+    const formattedUserLoc = coordinateFormat(userLoc);
 
-    const updateLocationInFirestore = async (latitude, longitude) => {
-      try {
-        await updateDoc(courierDocRef, {
-          location: new GeoPoint(latitude, longitude),
-        });
-      } catch (err) {
-        console.error("Failed to update location:", err);
-      }
-    };
-
-    const updateCourierStatus = async (status) => {
-      try {
-        await updateDoc(courierDocRef, { status });
-        setCourierData((prev) => ({ ...prev, status }));
-      } catch (err) {
-        console.error("Failed to update status:", err);
-        setError("Failed to update status.");
-      }
-    };
-
-    const throttleUpdate = () => {
-      if (locationQueue.current) {
-        const { latitude, longitude } = locationQueue.current;
-        updateLocationInFirestore(latitude, longitude);
-        locationQueue.current = null;
-      }
-      throttleTimeout.current = null;
-    };
-
-    const watcherId = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-
-        setCourierData((prev) => ({
-          ...prev,
-          location: { latitude, longitude },
-        }));
-
-        locationQueue.current = { latitude, longitude };
-
-        if (!throttleTimeout.current) {
-          throttleTimeout.current = setTimeout(throttleUpdate, 5000);
-        }
-
-        // If location access was previously denied, reset error and flag
-        if (locationAccessDenied) {
-          setLocationAccessDenied(false);
-          setError("");
-        }
-      },
-      (err) => {
-        console.error("Error watching location:", err);
-        setError("Unable to update location.");
-
-        if (err.code === 1) {
-          setLocationAccessDenied(true);
-
-          // Only update status if currently active (prevent redundant writes)
-          if (courierDataRef.current?.status !== "inactive") {
-            updateCourierStatus("inactive");
-          }
-        }
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    const locationValid = (
+      formattedCourierLoc && typeof formattedCourierLoc.latitude === 'number' && typeof formattedCourierLoc.longitude === 'number' &&
+      formattedUserLoc && typeof formattedUserLoc.latitude === 'number' && typeof formattedUserLoc.longitude === 'number'
     );
 
-    return () => {
-      navigator.geolocation.clearWatch(watcherId);
-      if (throttleTimeout.current) {
-        clearTimeout(throttleTimeout.current);
-        throttleTimeout.current = null;
+    if (!locationValid) {
+      console.warn(`Location data invalid for task ${task.orderId}. Cannot calculate ETA.`);
+      return;
+    }
+
+    let updates = {};
+
+    if (task.courierPickedUp) {
+      updates = calculateEtaCourier(formattedCourierLoc, formattedUserLoc, now);
+      updates.deliveryStatus = "Delivery enroute.";
+      updates.courierLocation = formattedCourierLoc;
+
+      const orderDocRef = doc(
+        db,
+        "restaurants",
+        task.restaurantId,
+        "restaurantOrders",
+        task.orderId
+      );
+
+      try {
+        await updateDoc(orderDocRef, updates);
+        
+        // Update local state 
+        setCurrentTask(prev => ({ 
+            ...prev, 
+            ...updates,
+            estimatedDeliveryTime: updates.estimatedDeliveryTime 
+        }));
+        
+      } catch (err) {
+        console.error(`Failed to update task ${task.orderId} ETA:`, err);
+        setError("Failed to update task ETA.");
       }
+    }
+  };
+
+
+  // 3. UNIFIED INTERVAL (5000 MS) for Location Fetching and Database Writes
+  useEffect(() => {
+    const courierId = courierData?.id;
+    if (!courierId || !navigator.geolocation) return;
+
+    const fetchAndWriteLocation = () => {
+        if (locationAccessDenied) return; 
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const { latitude, longitude } = position.coords;
+                const formattedLocation = { latitude, longitude }; 
+
+                setCourierData((prev) => ({
+                    ...prev,
+                    location: formattedLocation,
+                }));
+
+                updateCourierDoc({ location: formattedLocation });
+
+                if (currentTaskRef.current) {
+                    updateCourierTask(formattedLocation);
+                }
+
+                if (locationAccessDenied) {
+                    setLocationAccessDenied(false);
+                    setError("");
+                }
+            },
+            (err) => {
+                console.error("Location error during interval:", err.code, err.message);
+
+                if (err.code === 1) { // PERMISSION DENIED
+                    setLocationAccessDenied(true); 
+                    setError(getLocationErrorMessage(err.code));
+                    if (courierDataRef.current?.status !== "inactive") {
+                        updateCourierDoc({ status: "inactive" });
+                    }
+                } 
+            },
+            { enableHighAccuracy: true, maximumAge: 0 } 
+        );
+    };
+    const interval = setInterval(fetchAndWriteLocation, 5000); 
+    fetchAndWriteLocation();
+
+    return () => {
+        clearInterval(interval);
     };
   }, [courierData?.id, locationAccessDenied]);
 
+  // 4. Fetch Orders, handleAccept, handleReject (unchanged)
   useEffect(() => {
     const fetchAllOrders = async () => {
       try {
@@ -245,17 +292,14 @@ export default function CourierPage() {
 
           ordersSnapshot.forEach((orderDoc) => {
             const orderData = orderDoc.data();
-            const fullOrder = { ...orderData, restaurantId }; // include restaurantId so you can update later etc.
+            const fullOrder = { ...orderData, restaurantId };
 
-            // If this courier is the one assigned
             if (
               orderData.orderConfirmed === true &&
               orderData.courierId === courierData?.courierId
             ) {
-              // Found the current task
               assignedOrder = fullOrder;
             }
-            // Else if this courier is eligible but order not yet accepted (courierId is empty string)
             else if (
               orderData.orderConfirmed === true &&
               orderData.courierId === "" &&
@@ -269,7 +313,7 @@ export default function CourierPage() {
         }
 
         setOrders(availableOrders);
-        setCurrentTask(assignedOrder);  // may be null if none assigned
+        setCurrentTask(assignedOrder);
       } catch (err) {
         console.error("Error fetching orders:", err);
         setError("Failed to fetch orders.");
@@ -283,7 +327,7 @@ export default function CourierPage() {
     }
   }, [courierData]);
 
-  // handleAccept as you have, plus state updates
+  // handleAccept 
   const handleAccept = async (order) => {
     try {
       const orderDocRef = doc(
@@ -308,7 +352,6 @@ export default function CourierPage() {
 
       await batch.commit();
 
-      // After commit succeeds, update local state
       setCurrentTask({ ...order, courierId: courierData.courierId });
       setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
     } catch (err) {
@@ -330,7 +373,6 @@ export default function CourierPage() {
         courierConfirmed: false,
         courierRejectArray: courierData.courierId,
       });
-      // Also remove it locally
       setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
     } catch (err) {
       console.error("Error rejecting order:", err);
@@ -341,6 +383,7 @@ export default function CourierPage() {
   if (loadingAuth) return <div>Loading authentication...</div>;
   if (!user) return <Navigate to="/login" />;
 
+  //COMPONENT UI
   return (
   <div className="p-6">
     <h1 className="text-2xl font-bold">
@@ -392,7 +435,6 @@ export default function CourierPage() {
               <p><strong>Order ID:</strong> {currentTask.orderId}</p>
               <p><strong>Restaurant:</strong> {currentTask.restaurantAddress}</p>
               <p><strong>User Address:</strong> {currentTask.userAddress}</p>
-              {/* maybe show an “Abandon” or “Complete” button? */}
             </div>
           </section>
         ) : (
@@ -401,7 +443,7 @@ export default function CourierPage() {
 
         <hr className="my-8 border-t-2 border-gray-300" />
 
-        {/* Task List (you probably already have this part below) */}
+        {/* Task List */}
         <h2 className="text-xl font-semibold mb-4">📝 Task List</h2>
         {fetchingOrders ? (
           <p>Loading tasks…</p>
@@ -446,7 +488,6 @@ export default function CourierPage() {
   </div>
 );
 }
-
 
 /*
 TODO

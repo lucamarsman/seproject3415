@@ -1,10 +1,63 @@
 import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
+
+const stringToColor = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let color = '#';
+    for (let i = 0; i < 3; i++) {
+        const value = (hash >> (i * 8)) & 0xFF;
+        color += ('00' + value.toString(16)).substr(-2);
+    }
+    return color;
+};
+
+// Function to generate a custom L.divIcon with a colored border
+const createBorderedRestaurantIcon = (orderId) => {
+    const borderColor = stringToColor(orderId);
+    const html = `
+        <div style="
+            /* The overall size of the visible marker including the border: 40px */
+            width: 40px; 
+            height: 40px;
+            
+            /* Apply border and white background to the outer container */
+            border: 4px solid ${borderColor}; 
+            border-radius: 50%;
+            background-color: white; 
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            
+            /* Center the 32x32 image visually inside the 40x40 border area */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        ">
+            <img 
+                src="https://cdn-icons-png.flaticon.com/512/1046/1046784.png" 
+                /* Set the image back to its explicit size */
+                style="width: 32px; height: 32px; border-radius: 50%;"
+            />
+        </div>
+    `;
+
+    // Total visible size is 40x40.
+    const size = 40; 
+    const borderThickness = 4;
+    
+    return L.divIcon({
+        html: html,
+        className: 'custom-restaurant-marker',
+        iconSize: [size, size], 
+        iconAnchor: [16 + borderThickness, 32 + borderThickness], 
+        popupAnchor: [0, -size], 
+    });
+};
 
 function MapSetTo({ position }) {
   const map = useMap();
@@ -95,10 +148,11 @@ const restaurantIcon = new L.Icon({
   shadowAnchor: [13, 41],
 });
 
-
 export default function HomeTab({
   userLatLng,
   filteredRestaurants = [],
+  // ⬅️ FIX: restaurantsWithActiveOrders PROP MUST BE DESTRUCTURED HERE
+  restaurantsWithActiveOrders = {}, 
   searchTerm,
   setSearchTerm,
   filters,
@@ -270,29 +324,42 @@ export default function HomeTab({
             )}
 
             {filteredRestaurants
-              .filter((r) => r?.location?.latitude && r?.location?.longitude)
-              .map((r) => (
+            .filter((r) => r?.location?.latitude && r?.location?.longitude)
+            .map((r) => {
+              const activeOrders = restaurantsWithActiveOrders[r.id];
+              let iconToUse = restaurantIcon;
+
+              if (activeOrders && activeOrders.length > 0) {
+                const firstActiveOrderId = activeOrders[0].orderId;
+                iconToUse = createBorderedRestaurantIcon(firstActiveOrderId);
+              }
+
+              return (
                 <Marker
                   key={r.id}
                   position={[r.location.latitude, r.location.longitude]}
-                  icon={restaurantIcon}
+                  icon={iconToUse} 
                 >
                   <Popup>
-                    {r.storeName}
-                    <br />
-                    {r.address}
-                    <br />
-                    {typeof r.distance === "number"
-                      ? `${r.distance.toFixed(2)} km away`
-                      : ""}
+                    <div className="font-semibold mb-1">{r.storeName}</div>
+                    <div>{r.address}</div>
+                    <div className="text-sm text-gray-600 mt-1">
+                      {typeof r.distance === "number"
+                        ? `${r.distance.toFixed(2)} km away`
+                        : ""}
+                    </div>
+                    {activeOrders && activeOrders.length > 0 && (
+                      <div className="mt-2 text-sm font-medium text-green-700">
+                        {activeOrders.length} Active Order{activeOrders.length > 1 ? 's' : ''}
+                      </div>
+                    )}
                   </Popup>
                 </Marker>
-              ))}
+              );
+            })}
           </MapContainer>
         </div>
       </div>
-
-      {/* Results */}
       <h2 className="mt-8 text-xl">
         Nearby Restaurants within {searchRadius} km
       </h2>

@@ -3,10 +3,12 @@ import { onAuthStateChanged, getAuth } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, GeoPoint, Timestamp, increment } from "firebase/firestore";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
+import { coordinateFormat } from "../utils/coordinateFormat.js";
 import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../utils/isRestaurantAcceptingOrders.js";
 
 import defaultImage from "../assets/defaultImgUrl.png";
+
 const DEFAULT_IMAGE_URL = defaultImage;
 
 export default function OrderPage() {
@@ -25,7 +27,7 @@ export default function OrderPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // State for modifications
-  const [selectedModifications, setSelectedModifications] = useState({}); // { itemIndex: [{ name: '...', price: 0.00 }, ...] }
+  const [selectedModifications, setSelectedModifications] = useState({});
   const [restaurantNote, setRestaurantNote] = useState([]);
   
   // SINGLE auth listener
@@ -90,7 +92,7 @@ export default function OrderPage() {
     if (qty <= 0) {
         setQuantities((prev) => {
             const newQuantities = { ...prev };
-            delete newQuantities[index]; // Remove entry for 0 quantity
+            delete newQuantities[index];
             return newQuantities;
         });
         setSelectedModifications((prev) => {
@@ -98,7 +100,6 @@ export default function OrderPage() {
             delete newMods[index];
             return newMods;
         });
-        // ❌ Removed itemRequirements reset
     } else {
         setQuantities((prev) => ({
             ...prev,
@@ -131,9 +132,7 @@ export default function OrderPage() {
   const handleGlobalNoteChange = (e) => {
     const newNote = e.target.value;
     setRestaurantNote(prevNotes => {
-        // Create a new array based on the previous state
-        const newNotes = [...prevNotes]; 
-        // Set the new note text as the 0th element
+        const newNotes = [...prevNotes];
         newNotes[0] = newNote;
         return newNotes;
     });
@@ -225,6 +224,7 @@ export default function OrderPage() {
         orderTimeout: orderTimeout,
         deliveryStatus: "Awaiting restaurant confirmation.",
         orderConfirmed: null,
+        orderCompleted: false,
         orderId,
         restaurantId,
         userId,
@@ -236,9 +236,9 @@ export default function OrderPage() {
         estimatedPickUpTime: null,
         estimatedPreppedTime: null,
         restaurantAddress: restaurant.address || "",
-        restaurantLocation: restaurant.location,
+        restaurantLocation: coordinateFormat(restaurant.location),
         userAddress: userData.address,
-        userLocation: userData.deliveryLocation,
+        userLocation: coordinateFormat(userData.deliveryLocation),
         restaurantNote: restaurantNote,
       };
 

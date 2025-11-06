@@ -50,6 +50,9 @@ export default function UserPage() {
   const [activeTab, setActiveTab] = useState("home");
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
+  const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
+  const [activeDeliveryRoutes, setActiveDeliveryRoutes] = useState({});
+  
 
   const clearFormMessages = () => {
     setFormError("");
@@ -214,8 +217,57 @@ export default function UserPage() {
   ]);
 
   // --- ORDERS FOR USER ---
+  const stringToColor = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let color = '#';
+    for (let i = 0; i < 3; i++) {
+        const value = (hash >> (i * 8)) & 0xFF;
+        color += ('00' + value.toString(16)).substr(-2);
+    }
+    // Ensures the color is bright enough for a border (optional but useful)
+    return color;
+  };
+
+  // Function to generate a custom L.divIcon with a colored border
+  const createBorderedRestaurantIcon = (orderId) => {
+    const borderColor = stringToColor(orderId);
+    
+    // Create a custom HTML structure for the marker
+    const html = `
+        <div style="
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 42px; /* iconSize + border */
+            height: 42px;
+            border: 4px solid ${borderColor}; /* The highlight border */
+            border-radius: 50%;
+            background-color: white; 
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            transform: translate(-50%, -100%); /* Adjust to center the icon */
+        ">
+            <img 
+                src="https://cdn-icons-png.flaticon.com/512/1046/1046784.png" 
+                style="width: 32px; height: 32px; border-radius: 50%;"
+            />
+        </div>
+    `;
+
+    return L.divIcon({
+        html: html,
+        className: 'custom-restaurant-marker',
+        iconSize: [42, 42],
+        iconAnchor: [21, 42],
+        popupAnchor: [0, -42],
+    });
+  };
+
   const processingOrdersRef = useRef(new Set());
 
+  //Processing rejected orders
   useEffect(() => {
     if (!userData?.id || allRestaurants.length === 0) return;
     const unsubscribers = [];
@@ -240,17 +292,13 @@ export default function UserPage() {
             timeout && orderData.orderConfirmed === null && timeout < now;
 
           if (shouldReject) {
-            // --- CRITICAL FIX: DEDUPLICATION CHECK ---
             if (processingOrdersRef.current.has(orderId)) {
               console.log(`⏩ Order ${orderId} is already being processed. Skipping re-trigger.`);
               continue;
             }
             console.log(`⏰ Initiating auto-reject for timed-out order ${orderId}`);
 
-            // 1. Mark as processing BEFORE any awaits or state changes
             processingOrdersRef.current.add(orderId);
-
-            // 2. Immediately mark it visually as timed out
             setUserOrders((prev) =>
               prev.map((o) =>
                 o.orderId === orderId
@@ -258,16 +306,11 @@ export default function UserPage() {
                   : o
               )
             );
-            // 3. Perform Firestore update + create message (remote call)
             await updateOrderToRejected(restaurant.id, orderId);
-
-            // 5. Remove from processing set after successful completion
             processingOrdersRef.current.delete(orderId);
-
             continue; 
           }
 
-          // Otherwise, add valid active order
           fetchedOrders.push({
             orderId: orderId,
             fromRestaurant: restaurant.storeName,
@@ -275,11 +318,19 @@ export default function UserPage() {
           });
         }
 
-        // Merge this restaurant’s orders into the user’s list
+        const activeOrdersForRestaurant = fetchedOrders.filter(o => 
+            o.orderConfirmed !== false && o.orderCompleted !== true
+        );
+
         setUserOrders((prev) => {
           const others = prev.filter((o) => o.fromRestaurant !== restaurant.storeName);
           return [...others, ...fetchedOrders];
         });
+
+        setRestaurantsWithActiveOrders(prev => ({
+            ...prev,
+            [restaurant.id]: activeOrdersForRestaurant
+        }));
       });
       unsubscribers.push(unsub);
     }
@@ -290,8 +341,6 @@ export default function UserPage() {
   useEffect(() => {
     if (!userData?.id) return;
     const messagesRef = collection(db, "users", userData.id, "messages");
-
-    // Setup real-time listener for messages
     const unsub = onSnapshot(
       messagesRef,
       (snapshot) => {
@@ -299,17 +348,15 @@ export default function UserPage() {
           messageId: docSnap.id,
           ...docSnap.data(),
         }));
-        // Sort by createdAt time descending (newest first)
         fetchedMessages.sort((a, b) => {
           const timeA = a.createdAt?.toMillis?.() || 0;
           const timeB = b.createdAt?.toMillis?.() || 0;
-          return timeB - timeA; // B minus A for descending (newest first)
+          return timeB - timeA;
         });
         setUserMessages(fetchedMessages);
       },
       (error) => {
         console.error("Error listening to user messages:", error);
-        // Handle error fetching messages here
       }
     );
     return () => unsub();
@@ -520,6 +567,7 @@ export default function UserPage() {
           <HomeTab
             userLatLng={userLatLng}
             filteredRestaurants={filteredRestaurants}
+            restaurantsWithActiveOrders={restaurantsWithActiveOrders}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             filters={filters}
