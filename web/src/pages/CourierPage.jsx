@@ -50,7 +50,7 @@ export default function CourierPage() {
     try {
         await updateDoc(courierDocRef, updates);
         
-        setCourierData((prev) => ({ ...prev, ...updates })); 
+        setCourierData((prev) => ({ ...prev, ...updates }));
     } catch (err) {
         console.error("Failed to update courier document:", err);
         if (updates.status) {
@@ -164,7 +164,7 @@ export default function CourierPage() {
     const task = currentTaskRef.current;
     const courier = courierDataRef.current;
     
-    const courierLocation = latestFormattedLocation; 
+    const courierLocation = latestFormattedLocation;
     
     if (!task || !courier || !courierLocation || task.orderCompleted) {
       return;
@@ -173,7 +173,7 @@ export default function CourierPage() {
     const userLoc = task.userLocation;
     const now = new Date();
     
-    const formattedCourierLoc = courierLocation; 
+    const formattedCourierLoc = courierLocation;
     const formattedUserLoc = coordinateFormat(userLoc);
 
     const locationValid = (
@@ -225,12 +225,12 @@ export default function CourierPage() {
     if (!courierId || !navigator.geolocation) return;
 
     const fetchAndWriteLocation = () => {
-        if (locationAccessDenied) return; 
+        if (locationAccessDenied) return;
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 const { latitude, longitude } = position.coords;
-                const formattedLocation = { latitude, longitude }; 
+                const formattedLocation = { latitude, longitude };
 
                 setCourierData((prev) => ({
                     ...prev,
@@ -252,7 +252,7 @@ export default function CourierPage() {
                 console.error("Location error during interval:", err.code, err.message);
 
                 if (err.code === 1) { // PERMISSION DENIED
-                    setLocationAccessDenied(true); 
+                    setLocationAccessDenied(true);
                     setError(getLocationErrorMessage(err.code));
                     if (courierDataRef.current?.status !== "inactive") {
                         updateCourierDoc({ status: "inactive" });
@@ -262,7 +262,7 @@ export default function CourierPage() {
             { enableHighAccuracy: true, maximumAge: 0 } 
         );
     };
-    const interval = setInterval(fetchAndWriteLocation, 5000); 
+    const interval = setInterval(fetchAndWriteLocation, 5000);
     fetchAndWriteLocation();
 
     return () => {

@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 
-const COURIER_SPEED_KMH = 60; // Define speed here or import it
+const COURIER_SPEED_KMH = 60;
 
 export const calculateEtaCourier = (courierLoc, userLoc, now) => {
     // 1. Calculate direct distance

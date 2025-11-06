@@ -7,10 +7,9 @@ import {
   where,
   getDocs,
   runTransaction,
-  getDoc, // Needed for the initial check outside the transaction
+  getDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
-
 
 export async function updateOrderToRejected(restaurantId, orderId) {
   const orderDocRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
@@ -21,17 +20,15 @@ export async function updateOrderToRejected(restaurantId, orderId) {
   let messagesRef;
 
   try {
-    // --- PRE-CHECK: 1️⃣ Get userId and check for existing message (Non-Atomic) ---
+    // --- Get userId and check for existing message (Non-Atomic) ---
     const initialOrderSnapshot = await getDoc(orderDocRef);
     if (!initialOrderSnapshot.exists()) {
       console.warn(`Order ${orderId} not found for auto-rejection.`);
       return { success: false, messageCreated: false };
     }
     userId = initialOrderSnapshot.data().userId;
-
     if (userId) {
       messagesRef = collection(db, "users", userId, "messages");
-      // Perform the message check OUTSIDE the transaction for efficiency
       const existingMsgQuery = query(messagesRef, where("orderId", "==", orderId));
       const existingMsgSnap = await getDocs(existingMsgQuery);
 
@@ -41,22 +38,21 @@ export async function updateOrderToRejected(restaurantId, orderId) {
       }
     }
 
-    // --- ATOMIC OPERATION: Use a Transaction for the critical Order Update ---
     await runTransaction(db, async (transaction) => {
-      // 2️⃣ READ the order document (using transaction.get) ... (unchanged)
+      // READ the order document 
       const orderSnapshot = await transaction.get(orderDocRef);
       if (!orderSnapshot.exists()) {
         console.warn(`Order ${orderId} missing inside transaction.`);
         throw new Error("OrderNotFound"); 
       }
-      // 3️⃣ UPDATE the order status ... (unchanged)
+      // UPDATE the order status
       transaction.update(orderDocRef, {
         orderConfirmed: false,
         deliveryStatus: "Auto-rejected: Order timed out.",
       });
 
       if (userId && !existingMessageFound) {
-        // 4️⃣ Send new message to user (Atomic Set)
+        // Send new message to user (Atomic Set)
         messageText = "Your order timed out and could not be fulfilled. Refund has been initiated.";
         const newMessageRef = doc(messagesRef); 
         transaction.set(newMessageRef, {
@@ -67,13 +63,13 @@ export async function updateOrderToRejected(restaurantId, orderId) {
           orderId,
         });
 
-        messageWasCreated = true; // 👈 SET NEW FLAG
+        messageWasCreated = true;
         console.log(`📩 Transaction: Timeout message prepared for user ${userId}.`);
       }
     });
 
     console.log(`⏰ Order ${orderId} auto-rejected due to timeout.`);
-    return { success: true, userId, message: messageText, messageCreated: messageWasCreated }; // 👈 RETURN NEW FLAG
+    return { success: true, userId, message: messageText, messageCreated: messageWasCreated };
   } catch (err) {
     if (err.message === "OrderNotFound") {
       return { success: false, messageCreated: false };

@@ -1,4 +1,4 @@
-// RESTAURANT AUTO-ACCEPT STATUS
+// OrderPage.jsx function - RESTAURANT AUTO-ACCEPT STATUS
 export function isRestaurantAcceptingOrders(autoSetting) {
   if (!autoSetting) return true;
   const setting = String(autoSetting).toLowerCase();

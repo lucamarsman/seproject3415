@@ -16,10 +16,8 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
-import { coordinateFormat } from "../utils/coordinateFormat.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
 import { getDistanceInKm } from "../utils/getDistanceInKm.js";
-import { calculateEtaRestaurant } from '../utils/calculateEtaRestaurant.js';
 
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
@@ -179,9 +177,11 @@ export default function RestaurantPage() {
     fetchOrCreate();
   }, [user]);
 
-  const ordersRef = useRef(orders);
+  // --- Realtime listener for restaurantOrders (Initial load + updates)
+  const ordersRef = useRef(orders); // Ref to hold the mutable 'orders' state
 
   useEffect(() => {
+    // Update the ref whenever the 'orders' state changes
     ordersRef.current = orders; 
   }, [orders]); 
 
@@ -191,168 +191,206 @@ export default function RestaurantPage() {
 
     // GET ALL ORDERS IN RESTAURANT
     const ordersCollectionRef = collection(
-      db,
-      "restaurants",
-      restaurantData.id,
-      "restaurantOrders"
+        db,
+        "restaurants",
+        restaurantData.id,
+        "restaurantOrders"
     );
     let firstLoad = true; 
 
     // PROCESSING FUNCTION
     const processOrders = async (ordersArray) => {
-      const activeOrders = ordersArray.filter(
+    // 1. COURIER TRACKING AND ETA CALCULATION (activeOrders only)
+    const activeOrders = ordersArray.filter(
         (order) => 
-          order.courierConfirmed === true &&
-          order.courierId &&
-          order.restaurantLocation &&
-          order.userLocation &&
-          order.courierPickedUp === false
-      );
+            order.courierConfirmed === true &&
+            order.courierId &&
+            order.restaurantLocation &&
+            order.courierPickedUp === false
+    );
 
-      if (activeOrders.length > 0) {
-          const uniqueCourierIds = new Set(activeOrders.map(order => order.courierId));
-          const courierDataMap = new Map();
-          const updateBatch = writeBatch(db);
-          const localUpdates = [];
+    if (activeOrders.length > 0) {
+        const uniqueCourierIds = new Set(activeOrders.map(order => order.courierId));
+        const courierDataMap = new Map();
+        const updateBatch = writeBatch(db);
+        const localUpdates = [];
 
-          // Fetch all unique courier locations in parallel
-          await Promise.all(
+        // Fetch all unique courier locations in parallel
+        await Promise.all(
             Array.from(uniqueCourierIds).map(async (courierId) => {
-              const courierDocRef = doc(db, "couriers", courierId); 
-              try {
-                const courierSnap = await getDoc(courierDocRef);
-                if (courierSnap.exists()) {
-                  courierDataMap.set(courierId, courierSnap.data());
+                const courierDocRef = doc(db, "couriers", courierId); 
+                try {
+                    const courierSnap = await getDoc(courierDocRef);
+                    if (courierSnap.exists()) {
+                        courierDataMap.set(courierId, courierSnap.data());
+                    }
+                } catch (err) {
+                    console.error(`Error fetching courier ${courierId}:`, err);
                 }
-              } catch (err) {
-                console.error(`Error fetching courier ${courierId}:`, err);
-              }
             })
-          );
-          
-          // Loop through active orders to calculate ETA
-          for (const order of activeOrders) {
+        );
+        
+        // Loop through active orders to calculate ETA
+        for (const order of activeOrders) {
             const courier = courierDataMap.get(order.courierId);
-            const courierLocation = coordinateFormat(courier?.location);
-            const restaurantLocation = coordinateFormat(order.restaurantLocation);
-            const userLocation = coordinateFormat(order.userLocation);
-            
-            // Validation of all coordinates (must be done before the utility function call)
-            const locationValid = (
-                courierLocation && typeof courierLocation.latitude === 'number' && typeof courierLocation.longitude === 'number' &&
-                restaurantLocation && typeof restaurantLocation.latitude === 'number' && typeof restaurantLocation.longitude === 'number' &&
-                userLocation && typeof userLocation.latitude === 'number' && typeof userLocation.longitude === 'number'
-            );
 
             const now = new Date();
-            let preppedDate = new Date(now.getTime() + 5 * 60000);
-            let remainingPrepDurationMinutes = 5; // Default
+            let preppedDate = null;
+            let remainingPrepDurationMinutes = 0;
 
-            if (order.estimatedPreppedTime?.toDate) {
+            if (order.estimatedPreppedTime && typeof order.estimatedPreppedTime.toDate === 'function') {
                 preppedDate = order.estimatedPreppedTime.toDate();
+                // Calculate the difference in milliseconds and convert to minutes
                 remainingPrepDurationMinutes = Math.max(0, Math.round((preppedDate.getTime() - now.getTime()) / 60000));
             }
 
-            let updates = {};
+            const courierLoc = courier?.location;
+            const restaurantLoc = order.restaurantLocation;
+            const userLoc = order.userLocation;
+            
+            // Use safe access for coordinates in validation
+            const locationValid = (
+                courierLoc && typeof courierLoc._lat === 'number' && typeof courierLoc._long === 'number' &&
+                restaurantLoc && typeof restaurantLoc._lat === 'number' && typeof restaurantLoc._long === 'number' &&
+                userLoc && typeof userLoc.latitude === 'number' && typeof userLoc.longitude === 'number'
+            );
+            
+            let C_R_distanceKm = 0;
+            let R_U_distanceKm = 0;
+            let courier_R_EtaMinutes = NaN;
+            let courier_U_EtaMinutes = NaN;
+            
+            let estimatedPickUpTimeTimestamp = null;
+            let estimatedDeliveryTimeTimestamp = null;
             let newDeliveryStatus;
 
             if (locationValid) {
-                // --- CORE LOGIC: Use the shared utility function ---
-                updates = calculateEtaRestaurant(
-                  { courierLoc: courierLocation, restaurantLoc: restaurantLocation, userLoc: userLocation },                    
-                  now,
-                  preppedDate
-                );
+                // 1. DISTANCE CALCULATION
+                C_R_distanceKm = getDistanceInKm(courierLoc._lat, courierLoc._long, restaurantLoc._lat, restaurantLoc._long);
+                R_U_distanceKm = getDistanceInKm(restaurantLoc._lat, restaurantLoc._long, userLoc.latitude, userLoc.longitude);
 
-                newDeliveryStatus = "Awaiting courier pick-up.";
-                console.log(`Delivery Status updated for order ${order.orderId}`);
+                // 2. COURIER ETA DURATION CALCULATION (from now)
+                const COURIER_SPEED_KMH = 60;
+                const R_travelTimeMinutes = (C_R_distanceKm / COURIER_SPEED_KMH) * 60;
+                courier_R_EtaMinutes = Math.max(1, Math.round(R_travelTimeMinutes)); // Courier R_ETA Duration from now
+                const U_travelTimeMinutes = (R_U_distanceKm / COURIER_SPEED_KMH) * 60;
+                const R_U_courierTime = Math.max(1, Math.round(U_travelTimeMinutes)); // R -> U Travel Duration
+                
+                // 3. CALCULATE ESTIMATED PICKUP TIME (TIMESTAMP)
+                const courierArrivalDate = new Date(now.getTime() + courier_R_EtaMinutes * 60000);
+                let estimatedPickUpDate;
+                if (courierArrivalDate.getTime() > preppedDate.getTime()) {
+                    estimatedPickUpDate = courierArrivalDate;
+                } else {
+                    estimatedPickUpDate = preppedDate;
+                }
+                estimatedPickUpTimeTimestamp = Timestamp.fromDate(courierArrivalDate);
+
+                // 4. CALCULATE ESTIMATED DELIVERY TIME (TIMESTAMP)
+                const estimatedDeliveryDate = new Date(estimatedPickUpDate.getTime() + R_U_courierTime * 60000);
+                estimatedDeliveryTimeTimestamp = Timestamp.fromDate(estimatedDeliveryDate);                
+                courier_U_EtaMinutes = Math.round((estimatedDeliveryDate.getTime() - now.getTime()) / 60000);
+
+                // 6. SIMPLIFIED STATUS MESSAGE
+                console.log("Delivery Status updated");
+                newDeliveryStatus = "Awaiting courier pick-up."
+                /*
+                newDeliveryStatus = `
+                    Courier to Restaurant: **${C_R_distanceKm.toFixed(1)} km** (ETA: ${courier_R_EtaMinutes} min). 
+                    Delivery to User: **${R_U_distanceKm.toFixed(1)} km**. Total ETA to User: **${courier_U_EtaMinutes} min**.
+                    Food Ready Time (Remaining): **${remainingPrepDurationMinutes} min**.
+                `;*/
+
             } else {
-                console.log("Courier location issue.");
+                // Fallback status if location data is incomplete
+                newDeliveryStatus = `Courier assigned, but location data is temporarily unavailable. Food Ready Time (Remaining): **${remainingPrepDurationMinutes} min**.`;
+                console.warn(`Location data invalid for order ${order.orderId}. Cannot calculate distance.`);
             }
 
-              // Add update to the batch
-              const orderRef = doc(
-                  db,
-                  "restaurants",
-                  restaurantData.id,
-                  "restaurantOrders",
-                  order.orderId
-              );
-              
-              // Update the order document
-              updateBatch.update(orderRef, {
-                  deliveryStatus: newDeliveryStatus,
-                  courier_R_Distance: updates.C_R_distanceKm || NaN, 
-                  courier_R_EtaMinutes: updates.courier_R_EtaMinutes || NaN,
-                  estimatedPickUpTime: updates.estimatedPickUpTimeTimestamp || null,
-                  courier_U_Distance: updates.R_U_distanceKm || NaN, 
-                  courier_U_EtaMinutes: updates.courier_U_EtaMinutes || NaN,
-                  estimatedDeliveryTime: updates.estimatedDeliveryTimeTimestamp || null,
-                  courierLocation: courierLocation, 
-              });
+            // Add update to the batch
+            const orderRef = doc(
+                db,
+                "restaurants",
+                restaurantData.id,
+                "restaurantOrders",
+                order.orderId
+            );
+            
+            // Update the order document
+            updateBatch.update(orderRef, {
+                deliveryStatus: newDeliveryStatus,
+                courier_R_Distance: C_R_distanceKm, 
+                courier_R_EtaMinutes: courier_R_EtaMinutes,
+                estimatedPickUpTime: estimatedPickUpTimeTimestamp, // Timestamp
+                courier_U_Distance: R_U_distanceKm, 
+                courier_U_EtaMinutes: courier_U_EtaMinutes,
+                estimatedDeliveryTime: estimatedDeliveryTimeTimestamp, // Timestamp
+                courierLat: courierLoc?._lat || null, 
+                courierLng: courierLoc?._long || null, 
+            });
 
-              // Prepare local state update
-              localUpdates.push({
-                  orderId: order.orderId,
-                  deliveryStatus: newDeliveryStatus,
-              });
-          }
+            // Prepare local state update
+            localUpdates.push({
+                orderId: order.orderId,
+                deliveryStatus: newDeliveryStatus,
+            });
+        }
 
-          // Commit the batch updates to Firestore
-          if (localUpdates.length > 0) {
-              try {
-                  await updateBatch.commit();
-                  setOrders(prevOrders => prevOrders.map(order => {
-                      const update = localUpdates.find(u => u.orderId === order.orderId);
-                      return update ? { ...order, deliveryStatus: update.deliveryStatus } : order;
-                  }));
-              } catch (error) {
-                  console.error("Batch ETA update failed:", error);
-              }
-          }
-      }
-      
-      // --- 2. EXISTING TIMEOUT REJECTION LOGIC (unchanged) ---
-      const now = new Date();
-      const timedOutOrders = ordersArray.filter((order) => {
-          const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
-          const shouldReject = timeout && order.orderConfirmed === null && timeout < now;
-          if (shouldReject) {
-              console.log(`!!! Order ${order.orderId} is TIMED OUT.`);
-          }
-          return shouldReject;
-      });
+        // Commit the batch updates to Firestore
+        if (localUpdates.length > 0) {
+            try {
+                await updateBatch.commit();
+                setOrders(prevOrders => prevOrders.map(order => {
+                    const update = localUpdates.find(u => u.orderId === order.orderId);
+                    return update ? { ...order, deliveryStatus: update.deliveryStatus } : order;
+                }));
+            } catch (error) {
+                console.error("Batch ETA update failed:", error);
+            }
+        }
+    }
+    
+    // --- 2. EXISTING TIMEOUT REJECTION LOGIC (unchanged) ---
+    const now = new Date();
+    const timedOutOrders = ordersArray.filter((order) => {
+        const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
+        const shouldReject = timeout && order.orderConfirmed === null && timeout < now;
+        if (shouldReject) {
+            console.log(`!!! Order ${order.orderId} is TIMED OUT.`);
+        }
+        return shouldReject;
+    });
 
-      if (timedOutOrders.length === 0) return;
+    if (timedOutOrders.length === 0) return;
 
-      // 1. Run the atomic update for all timed-out orders
-      const rejectionResults = await Promise.all(
-          timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
-      );
-      
-      // 2. Update local state for all successful rejections
-      const successfullyRejectedIds = timedOutOrders
-          .filter((_, index) => rejectionResults[index].success)
-          .map(order => order.orderId);
+    // 1. Run the atomic update for all timed-out orders
+    const rejectionResults = await Promise.all(
+        timedOutOrders.map(order => updateOrderToRejected(restaurantData.id, order.orderId))
+    );
+    
+    // 2. Update local state for all successful rejections
+    const successfullyRejectedIds = timedOutOrders
+        .filter((_, index) => rejectionResults[index].success)
+        .map(order => order.orderId);
 
-      if (successfullyRejectedIds.length > 0) {
-          setOrders(prevOrders => {
-              return prevOrders.map(order => {
-                  if (successfullyRejectedIds.includes(order.orderId)) {
-                      console.log(`[Local Update] Rejected order ${order.orderId} status updated.`);
-                      return {
-                          ...order,
-                          orderConfirmed: false,
-                          deliveryStatus: "Auto-rejected: Order timed out."
-                      };
-                  }
-                  return order;
-              });
-          });
-      }
+    if (successfullyRejectedIds.length > 0) {
+        setOrders(prevOrders => {
+            return prevOrders.map(order => {
+                if (successfullyRejectedIds.includes(order.orderId)) {
+                    console.log(`[Local Update] Rejected order ${order.orderId} status updated.`);
+                    return {
+                        ...order,
+                        orderConfirmed: false,
+                        deliveryStatus: "Auto-rejected: Order timed out."
+                    };
+                }
+                return order;
+            });
+        });
+    }
   };
 
-    // 1️REAL-TIME LISTENER: Updates the UI/local state (setOrders)
+    // 1️⃣ REAL-TIME LISTENER: Updates the UI/local state (setOrders) and manages loading
     const unsub = onSnapshot(
         ordersCollectionRef,
         (snapshot) => {
@@ -361,8 +399,10 @@ export default function RestaurantPage() {
                 ...docSnap.data(),
             }));
             
+            // Update the state immediately on any Firestore change.
             setOrders(fetchedOrders);
             
+            // Manage loading state ONLY here
             if (firstLoad) {
                 setLoadingOrders(false);
                 firstLoad = false;
@@ -375,7 +415,7 @@ export default function RestaurantPage() {
         }
     );
 
-    // INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
+    // 2️⃣ INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
     const interval = setInterval(() => {
         const currentOrders = ordersRef.current; 
         if (currentOrders.length === 0) return;
@@ -805,9 +845,9 @@ return (
                 autoSetting: newSettings.autoSetting,
               });
 
-              console.log("Settings saved to Firestore:", newSettings);
+              console.log("✅ Settings saved to Firestore:", newSettings);
             } catch (err) {
-              console.error("Failed to save settings:", err);
+              //console.error("❌ Failed to save settings:", err);
             }
           }}
         />
@@ -816,7 +856,6 @@ return (
   </div>
 );
 }
-
 
 /*
 **** The accepted orders under heading "Orders awaiting pickup"

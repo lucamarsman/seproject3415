@@ -1,4 +1,4 @@
-// RESTAURANT OPEN TIMES
+// OrderPage.jsx function - RESTAURANT OPEN TIMES
 export function isRestaurantOpenToday(hoursArray, now = new Date()) {
   const days = [
     "Sunday",

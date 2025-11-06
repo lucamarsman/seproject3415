@@ -51,9 +51,7 @@ export default function UserPage() {
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
   const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
-  const [activeDeliveryRoutes, setActiveDeliveryRoutes] = useState({});
-  
-
+    
   const clearFormMessages = () => {
     setFormError("");
     setFormSuccess("");
@@ -215,55 +213,6 @@ export default function UserPage() {
     currentDateTime,
     filters.types,
   ]);
-
-  // --- ORDERS FOR USER ---
-  const stringToColor = (str) => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    let color = '#';
-    for (let i = 0; i < 3; i++) {
-        const value = (hash >> (i * 8)) & 0xFF;
-        color += ('00' + value.toString(16)).substr(-2);
-    }
-    // Ensures the color is bright enough for a border (optional but useful)
-    return color;
-  };
-
-  // Function to generate a custom L.divIcon with a colored border
-  const createBorderedRestaurantIcon = (orderId) => {
-    const borderColor = stringToColor(orderId);
-    
-    // Create a custom HTML structure for the marker
-    const html = `
-        <div style="
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 42px; /* iconSize + border */
-            height: 42px;
-            border: 4px solid ${borderColor}; /* The highlight border */
-            border-radius: 50%;
-            background-color: white; 
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-            transform: translate(-50%, -100%); /* Adjust to center the icon */
-        ">
-            <img 
-                src="https://cdn-icons-png.flaticon.com/512/1046/1046784.png" 
-                style="width: 32px; height: 32px; border-radius: 50%;"
-            />
-        </div>
-    `;
-
-    return L.divIcon({
-        html: html,
-        className: 'custom-restaurant-marker',
-        iconSize: [42, 42],
-        iconAnchor: [21, 42],
-        popupAnchor: [0, -42],
-    });
-  };
 
   const processingOrdersRef = useRef(new Set());
 
