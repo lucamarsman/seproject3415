@@ -1,28 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from "react-leaflet";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMap,
+  Polyline,
+} from "react-leaflet";
 import L from "leaflet";
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
 
 const stringToColor = (str) => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    let color = '#';
-    for (let i = 0; i < 3; i++) {
-        const value = (hash >> (i * 8)) & 0xFF;
-        color += ('00' + value.toString(16)).substr(-2);
-    }
-    return color;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let color = "#";
+  for (let i = 0; i < 3; i++) {
+    const value = (hash >> (i * 8)) & 0xff;
+    color += ("00" + value.toString(16)).substr(-2);
+  }
+  return color;
 };
 
 // Function to generate a custom L.divIcon with a colored border
 const createBorderedRestaurantIcon = (orderId) => {
-    const borderColor = stringToColor(orderId);
-    const html = `
+  const borderColor = stringToColor(orderId);
+  const html = `
         <div style="
             /* The overall size of the visible marker including the border: 40px */
             width: 40px; 
@@ -47,93 +54,110 @@ const createBorderedRestaurantIcon = (orderId) => {
         </div>
     `;
 
-    // Total visible size is 40x40.
-    const size = 40; 
-    const borderThickness = 4;
-    
-    return L.divIcon({
-        html: html,
-        className: 'custom-restaurant-marker',
-        iconSize: [size, size], 
-        iconAnchor: [16 + borderThickness, 32 + borderThickness], 
-        popupAnchor: [0, -size], 
-    });
-};
+  // Total visible size is 40x40.
+  const size = 40;
+  const borderThickness = 4;
 
+  return L.divIcon({
+    html: html,
+    className: "custom-restaurant-marker",
+    iconSize: [size, size],
+    iconAnchor: [16 + borderThickness, 32 + borderThickness],
+    popupAnchor: [0, -size],
+  });
+};
 
 // --- OrderDeliveryPath - Polyline using real-time courier updates ---
 function OrderDeliveryPath({ activeOrders, userLatLng }) {
-    const [liveCourierLocations, setLiveCourierLocations] = useState({});
-    const confirmedOrders = useMemo(() => {
+  const [liveCourierLocations, setLiveCourierLocations] = useState({});
+  const confirmedOrders = useMemo(() => {
     return Object.values(activeOrders)
-        .flat()
-        .filter(order => 
-            order.courierConfirmed === true && 
-            order.courierId && 
-            order.restaurantLocation && 
-            order.courierLocation 
+      .flat()
+      .filter(
+        (order) =>
+          order.courierConfirmed === true &&
+          order.courierId &&
+          order.restaurantLocation &&
+          order.courierLocation
+      );
+  }, [activeOrders]);
+
+  useEffect(() => {
+    const courierIds = confirmedOrders.map((order) => order.courierId);
+    const uniqueCourierIds = [...new Set(courierIds)];
+
+    const fetchCourierLocation = async (courierId) => {
+      try {
+        const db = getFirestore();
+        const docRef = doc(db, "couriers", courierId);
+        const docSnap = await getDoc(docRef);
+        const fetchedData = docSnap.exists() ? docSnap.data()?.location : null;
+        if (fetchedData && fetchedData.latitude && fetchedData.longitude) {
+          setLiveCourierLocations((prev) => ({
+            ...prev,
+            [courierId]: {
+              latitude: fetchedData.latitude,
+              longitude: fetchedData.longitude,
+            },
+          }));
+        }
+      } catch (error) {
+        console.error(
+          "Error fetching courier location for ID:",
+          courierId,
+          error
         );
-    }, [activeOrders]);
+      }
+    };
+    const updateAllCouriers = () => {
+      uniqueCourierIds.forEach(fetchCourierLocation);
+    };
+    updateAllCouriers();
+    const intervalId = setInterval(updateAllCouriers, 5000);
+    return () => clearInterval(intervalId);
+  }, [confirmedOrders]);
 
-    useEffect(() => {
-        const courierIds = confirmedOrders.map(order => order.courierId);
-        const uniqueCourierIds = [...new Set(courierIds)];
+  return (
+    <>
+      {confirmedOrders.map((order) => {
+        const restaurantCoords = [
+          order.restaurantLocation.latitude,
+          order.restaurantLocation.longitude,
+        ];
+        const userCoords = userLatLng;
+        const liveLocation =
+          liveCourierLocations[order.courierId] || order.courierLocation;
+        const courierCoords = [liveLocation.latitude, liveLocation.longitude];
+        const pathColor = stringToColor(order.orderId);
+        const polylinePositions = [restaurantCoords, courierCoords, userCoords];
 
-        const fetchCourierLocation = async (courierId) => {
-            try {
-                const db = getFirestore(); 
-                const docRef = doc(db, 'couriers', courierId); 
-                const docSnap = await getDoc(docRef);
-                const fetchedData = docSnap.exists() ? docSnap.data()?.location : null;
-                if (fetchedData && fetchedData.latitude && fetchedData.longitude) {
-                    setLiveCourierLocations(prev => ({
-                        ...prev,
-                        [courierId]: { 
-                            latitude: fetchedData.latitude, 
-                            longitude: fetchedData.longitude 
-                        }
-                    }));
-                }
-            } catch (error) {
-                console.error("Error fetching courier location for ID:", courierId, error);
+        return (
+          <React.Fragment key={order.orderId}>
+            {
+              <Polyline
+                positions={polylinePositions}
+                pathOptions={{
+                  color: pathColor,
+                  weight: 3,
+                  dashArray: "10, 5",
+                }}
+              />
             }
-        };
-        const updateAllCouriers = () => {
-            uniqueCourierIds.forEach(fetchCourierLocation);
-        };
-        updateAllCouriers();
-        const intervalId = setInterval(updateAllCouriers, 5000);
-        return () => clearInterval(intervalId);
-    }, [confirmedOrders]);
-
-    return (
-        <>
-            {confirmedOrders.map((order) => {
-                const restaurantCoords = [order.restaurantLocation.latitude, order.restaurantLocation.longitude];
-                const userCoords = userLatLng;
-                const liveLocation = liveCourierLocations[order.courierId] || order.courierLocation;
-                const courierCoords = [liveLocation.latitude, liveLocation.longitude];
-                const pathColor = stringToColor(order.orderId);
-                const polylinePositions = [restaurantCoords, courierCoords, userCoords];
-
-                return (
-                    <React.Fragment key={order.orderId}>
-                      
-                      {
-                        <Polyline 
-                            positions={polylinePositions}
-                            pathOptions={{ color: pathColor, weight: 3, dashArray: '10, 5' }}
-                        /> }
-                        <CircleMarker
-                            center={courierCoords}
-                            radius={8}
-                            pathOptions={{ color: pathColor, fillColor: pathColor, fillOpacity: 1, weight: 2 }}
-                        />
-                    </React.Fragment>
-                );
-            })}
-        </>
-    );
+            <CircleMarker
+              center={courierCoords}
+              radius={8}
+              pathOptions={{
+                color: pathColor,
+                fillColor: pathColor,
+                fillOpacity: 1,
+                weight: 2,
+              }}
+            />
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
 }
 
 function MapSetTo({ position }) {
@@ -228,7 +252,7 @@ const restaurantIcon = new L.Icon({
 export default function HomeTab({
   userLatLng,
   filteredRestaurants = [],
-  restaurantsWithActiveOrders = {}, 
+  restaurantsWithActiveOrders = {},
   searchTerm,
   setSearchTerm,
   filters,
@@ -255,6 +279,12 @@ export default function HomeTab({
     ],
     [userLatLng, filteredRestaurants]
   );
+
+  function getBannerUrl(r) {
+    if (!r.bannerUrl) return null;
+    const v = r.bannerUpdatedAt || 0;
+    return v ? `${r.bannerUrl}?v=${v}` : r.bannerUrl;
+  }
 
   return (
     <>
@@ -370,9 +400,12 @@ export default function HomeTab({
               attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            
+
             {/* NEW: Component to draw the delivery path */}
-            <OrderDeliveryPath activeOrders={restaurantsWithActiveOrders} userLatLng={userLatLng} />
+            <OrderDeliveryPath
+              activeOrders={restaurantsWithActiveOrders}
+              userLatLng={userLatLng}
+            />
 
             <Marker position={userLatLng}>
               <Popup>Your delivery location</Popup>
@@ -403,39 +436,40 @@ export default function HomeTab({
             )}
 
             {filteredRestaurants
-            .filter((r) => r?.location?.latitude && r?.location?.longitude)
-            .map((r) => {
-              const activeOrders = restaurantsWithActiveOrders[r.id];
-              let iconToUse = restaurantIcon;
+              .filter((r) => r?.location?.latitude && r?.location?.longitude)
+              .map((r) => {
+                const activeOrders = restaurantsWithActiveOrders[r.id];
+                let iconToUse = restaurantIcon;
 
-              if (activeOrders && activeOrders.length > 0) {
-                const firstActiveOrderId = activeOrders[0].orderId;
-                iconToUse = createBorderedRestaurantIcon(firstActiveOrderId);
-              }
+                if (activeOrders && activeOrders.length > 0) {
+                  const firstActiveOrderId = activeOrders[0].orderId;
+                  iconToUse = createBorderedRestaurantIcon(firstActiveOrderId);
+                }
 
-              return (
-                <Marker
-                  key={r.id}
-                  position={[r.location.latitude, r.location.longitude]}
-                  icon={iconToUse} 
-                >
-                  <Popup>
-                    <div className="font-semibold mb-1">{r.storeName}</div>
-                    <div>{r.address}</div>
-                    <div className="text-sm text-gray-600 mt-1">
-                      {typeof r.distance === "number"
-                        ? `${r.distance.toFixed(2)} km away`
-                        : ""}
-                    </div>
-                    {activeOrders && activeOrders.length > 0 && (
-                      <div className="mt-2 text-sm font-medium text-green-700">
-                        {activeOrders.length} Active Order{activeOrders.length > 1 ? 's' : ''}
+                return (
+                  <Marker
+                    key={r.id}
+                    position={[r.location.latitude, r.location.longitude]}
+                    icon={iconToUse}
+                  >
+                    <Popup>
+                      <div className="font-semibold mb-1">{r.storeName}</div>
+                      <div>{r.address}</div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {typeof r.distance === "number"
+                          ? `${r.distance.toFixed(2)} km away`
+                          : ""}
                       </div>
-                    )}
-                  </Popup>
-                </Marker>
-              );
-            })}
+                      {activeOrders && activeOrders.length > 0 && (
+                        <div className="mt-2 text-sm font-medium text-green-700">
+                          {activeOrders.length} Active Order
+                          {activeOrders.length > 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </Popup>
+                  </Marker>
+                );
+              })}
           </MapContainer>
         </div>
       </div>
@@ -448,7 +482,7 @@ export default function HomeTab({
           No restaurants match your filters.
         </p>
       ) : (
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
           {filteredRestaurants.map((r) => (
             <button
               key={r.id}
@@ -459,61 +493,83 @@ export default function HomeTab({
                   state: { restaurant: r },
                 });
               }}
-              className="text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition p-4 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              className="text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
             >
-              <div className="flex items-start justify-between gap-3">
-                <h4 className="font-semibold">
-                  {r.storeName}
-                  <span className="ml-2 text-sm text-gray-600">
-                    {typeof r.distance === "number"
-                      ? `— ${r.distance.toFixed(2)} km`
-                      : "— Location missing"}
-                  </span>
-                </h4>
-                <span className="shrink-0 text-sm font-medium">
-                  {r.rating ?? "N/A"}★
-                </span>
+              <div className="relative w-full aspect-[5/1] bg-gray-100">
+                {getBannerUrl(r) ? (
+                  <img
+                    src={getBannerUrl(r)}
+                    alt={`${r.storeName} banner`}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background: `linear-gradient(135deg, ${stringToColor(
+                        r.storeName
+                      )} 0%, #2563EB 100%)`,
+                    }}
+                  ></div>
+                )}
               </div>
 
-              <p className="mt-1 text-sm text-gray-700">{r.address}</p>
-
-              {r.hours && (
-                <p className="mt-2 font-medium">
-                  {/* OPEN / CLOSED STATUS */}
-                  <span
-                    className={`text-sm ${
-                      isRestaurantOpenToday(r.hours, currentDateTime)
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {isRestaurantOpenToday(r.hours, currentDateTime)
-                      ? "Open"
-                      : "Closed"}
-                  </span>
-
-                  {/* HOURS RANGE */}
-                  <span className="ml-2 text-sm text-gray-500">
-                    {(() => {
-                      const dayName = new Date().toLocaleDateString("en-US", {
-                        weekday: "long",
-                      });
-                      const todayHours = r.hours.find((entry) => entry[dayName]);
-                      if (!todayHours) return "(No hours set)";
-                      const opening = todayHours[dayName].Opening;
-                      const closing = todayHours[dayName].Closing;
-                      return `(${formatTime(opening)} - ${formatTime(closing)})`;
-                    })()}
-                  </span>
-
-                  {/* AUTOSETTING STATUS */}
-                  {!isRestaurantAcceptingOrders(r.autoSetting) && (
-                    <span className="ml-2 text-red-600 text-sm font-medium">
-                      — Currently not accepting orders
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <h4 className="font-semibold">
+                    {r.storeName}
+                    <span className="ml-2 text-sm text-gray-600">
+                      {typeof r.distance === "number"
+                        ? `— ${r.distance.toFixed(2)} km`
+                        : "— Location missing"}
                     </span>
-                  )}
-                </p>
-              )}
+                  </h4>
+                  <span className="shrink-0 text-sm font-medium">
+                    {r.rating ?? "N/A"}★
+                  </span>
+                </div>
+
+                <p className="mt-1 text-sm text-gray-700">{r.address}</p>
+
+                {r.hours && (
+                  <p className="mt-2 font-medium">
+                    <span
+                      className={`text-sm ${
+                        isRestaurantOpenToday(r.hours, currentDateTime)
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {isRestaurantOpenToday(r.hours, currentDateTime)
+                        ? "Open"
+                        : "Closed"}
+                    </span>
+                    <span className="ml-2 text-sm text-gray-500">
+                      {(() => {
+                        const dayName = new Date().toLocaleDateString("en-US", {
+                          weekday: "long",
+                        });
+                        const todayHours = r.hours.find(
+                          (entry) => entry[dayName]
+                        );
+                        if (!todayHours) return "(No hours set)";
+                        const opening = todayHours[dayName].Opening;
+                        const closing = todayHours[dayName].Closing;
+                        return `(${opening.slice(0, 2)}:${opening.slice(
+                          2
+                        )} - ${closing.slice(0, 2)}:${closing.slice(2)})`;
+                      })()}
+                    </span>
+                    {!isRestaurantAcceptingOrders(r.autoSetting) && (
+                      <span className="ml-2 text-red-600 text-sm font-medium">
+                        — Currently not accepting orders
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
             </button>
           ))}
         </div>
