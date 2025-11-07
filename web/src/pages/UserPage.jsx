@@ -445,7 +445,7 @@ export default function UserPage() {
           // 2. Update the document with the new notes array AND the new orderTimeout
           await updateDoc(orderRef, { 
               restaurantNote: newRestaurantNote,
-              orderTimeout: dbTimeout // <-- FIX 1: Update DB timeout
+              orderTimeout: dbTimeout
           });
 
           // 3. Immediately reflect the change in the local state (userOrders)
@@ -455,7 +455,7 @@ export default function UserPage() {
                       ? { 
                             ...o, 
                             restaurantNote: newRestaurantNote, 
-                            orderTimeout: dbTimeout // <-- FIX 2: Update local state timeout
+                            orderTimeout: dbTimeout
                         } 
                       : o
               )
