@@ -16,7 +16,7 @@ const firebaseConfig = {
   storageBucket: "fooddelivery196.firebasestorage.app",
   messagingSenderId: "239076059413",
   appId: "1:239076059413:web:550bea2a3f7e81bf29611c",
-  measurementId: "G-P1D1HG58SB"
+  measurementId: "G-P1D1HG58SB",
 };
 
 // Initialize Firebase
