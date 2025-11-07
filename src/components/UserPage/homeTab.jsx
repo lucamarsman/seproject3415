@@ -122,7 +122,7 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
                 const pathOptions = { 
                     color: pathColor, 
                     weight: 2, 
-                    dashArray: order.courierPickedUp ? '' : '10, 5'
+                    dashArray: '10, 5'
                 };
 
 

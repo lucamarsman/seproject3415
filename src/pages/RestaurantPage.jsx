@@ -587,7 +587,7 @@ return (
         Restaurant Manager Dashboard
       </h1>
       <h2 className="text-2xl font-bold mb-6">
-        Welcome, {user.displayName || user.email} (Restaurant Manager)
+        Welcome, {user.displayName || user.email} (Restaurant Manager) of {restaurantData.storeName}
       </h2>
 
       {/* 1. Restaurant Info Tab (activeTab === "info") */}

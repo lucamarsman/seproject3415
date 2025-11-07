@@ -38,6 +38,34 @@ export default function CourierPage() {
     currentTaskRef.current = currentTask;
   }, [currentTask]);
 
+  const fetchCurrentTaskStatus = async (orderId, restaurantId) => {
+    const task = currentTaskRef.current;
+    if (!orderId || !restaurantId || !task) return;
+
+    try {
+        const orderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
+        const orderSnap = await getDoc(orderRef);
+
+        if (!orderSnap.exists()) {
+            console.warn(`Order document not found: ${orderId}`);
+            if (task.orderId === orderId) setCurrentTask(null);
+            return;
+        }
+
+        const updatedPickupStatus = !!orderSnap.data().courierPickedUp;
+        
+        if (updatedPickupStatus !== task.courierPickedUp) {
+            setCurrentTask(prev => ({
+                ...prev,
+                courierPickedUp: updatedPickupStatus, 
+            }));
+            console.log(`Task pickup status updated to: ${updatedPickupStatus}`);
+        }
+    } catch (error) {
+        console.error("Error fetching task status:", error);
+    }
+  };
+
   // Helper: Update courier status in Firestore and state
   const updateCourierDoc = async (updates) => {
     const currentCourierId = courierDataRef.current?.id;
@@ -82,7 +110,7 @@ export default function CourierPage() {
     return unsubscribe;
   }, []);
 
-  // 1. Initial Fetch/Create Courier Logic (unchanged for brevity, but needed)
+  // 1. Initial Fetch/Create Courier Logic
   useEffect(() => {
     if (!user) return;
 
@@ -143,6 +171,7 @@ export default function CourierPage() {
               setLocationAccessDenied(true);
             }
 
+            // fix this
             if (courierData?.id && courierData.status !== "inactive") {
               updateCourierStatus("inactive");
             }
@@ -224,29 +253,57 @@ export default function CourierPage() {
   useEffect(() => {
     const courierId = courierData?.id;
     if (!courierId || !navigator.geolocation) return;
+    const currentOrders = orders;
 
-    const fetchAndWriteLocation = () => {
+    const fetchAndWriteLocation = async () => {
         if (locationAccessDenied) return;
 
         navigator.geolocation.getCurrentPosition(
-            (position) => {
+            async (position) => {
                 const { latitude, longitude } = position.coords;
                 const formattedLocation = { latitude, longitude };
-
+                console.log(formattedLocation);
+                
+                // 1. LOCATION UPDATE (Always runs)
                 setCourierData((prev) => ({
                     ...prev,
                     location: formattedLocation,
                 }));
-
                 updateCourierDoc({ location: formattedLocation });
 
+                // 2. CURRENT TASK STATUS/ETA UPDATE (Only if assigned)
                 if (currentTaskRef.current) {
                     updateCourierTask(formattedLocation);
-                    
-                    fetchCurrentTaskStatus(
+                    fetchCurrentTaskStatus( 
                         currentTaskRef.current.orderId, 
-                        currentTaskRef.current.restaurantId
+                        currentTaskRef.current.restaurantId 
                     );
+                }
+                
+                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
+                if (!currentTaskRef.current || currentOrders.length === 0) {
+                    
+                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
+
+                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
+                    const newAvailableOrderIds = new Set(availableOrders.map(o => o.orderId));
+                    
+                    const hasNewOrders = availableOrders.some(order => !currentOrderIds.has(order.orderId));
+                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
+
+                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
+                        setOrders(availableOrders);
+                        setCurrentTask(assignedOrder);
+                        setFetchingOrders(false);
+                        console.log(`Task list updated: ${availableOrders.length} tasks now available.`);
+                    }
+                
+                } else {
+                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
+                    if (!assignedOrder && currentTaskRef.current) {
+                        setCurrentTask(null);
+                        setFetchingOrders(false);
+                    }
                 }
 
                 if (locationAccessDenied) {
@@ -257,7 +314,7 @@ export default function CourierPage() {
             (err) => {
                 console.error("Location error during interval:", err.code, err.message);
 
-                if (err.code === 1) { // PERMISSION DENIED
+                if (err.code === 1) {
                     setLocationAccessDenied(true);
                     setError(getLocationErrorMessage(err.code));
                     if (courierDataRef.current?.status !== "inactive") {
@@ -269,17 +326,16 @@ export default function CourierPage() {
         );
     };
     const interval = setInterval(fetchAndWriteLocation, 5000);
-    fetchAndWriteLocation();
+    fetchAndWriteLocation(); 
 
     return () => {
         clearInterval(interval);
     };
-  }, [courierData?.id, locationAccessDenied]);
+  }, [courierData?.id, locationAccessDenied, orders]);
 
   // 4. Fetch Orders, handleAccept, handleReject
-  useEffect(() => {
-    const fetchAllOrders = async () => {
-      try {
+  const fetchAllOrders = async (courierId) => {
+    try {
         const restaurantsRef = collection(db, "restaurants");
         const restaurantsSnapshot = await getDocs(restaurantsRef);
 
@@ -287,57 +343,44 @@ export default function CourierPage() {
         let assignedOrder = null;
 
         for (const restaurantDoc of restaurantsSnapshot.docs) {
-          const restaurantId = restaurantDoc.id;
-          const ordersRef = collection(
-            db,
-            "restaurants",
-            restaurantId,
-            "restaurantOrders"
-          );
-          const ordersSnapshot = await getDocs(ordersRef);
-
-          ordersSnapshot.forEach((orderDoc) => {
-            const orderData = orderDoc.data();
-            const fullOrder = { ...orderData, restaurantId };
-            if (orderData.orderCompleted === true) {
-              return; 
-            }
-
-            // 1. Check for the courier's assigned order (Current Task)
-            if (
-              orderData.orderConfirmed === true &&
-              orderData.courierId === courierData?.courierId
-            ) {
-              assignedOrder = fullOrder;
-            }
+            const restaurantId = restaurantDoc.id;
+            const ordersRef = collection(
+                db,
+                "restaurants",
+                restaurantId,
+                "restaurantOrders"
+            );
+            const ordersSnapshot = await getDocs(ordersRef);
+            ordersSnapshot.forEach((orderDoc) => {
+                const orderData = orderDoc.data();
+                const fullOrder = { ...orderData, restaurantId, orderId: orderDoc.id }; 
                 
-            // 2. Check for orders available for acceptance
-            else if (
-              orderData.orderConfirmed === true &&
-              orderData.courierId === "" &&
-              Array.isArray(orderData.courierArray) &&
-              courierData?.courierId &&
-              orderData.courierArray.includes(courierData.courierId)
-            ) {
-              availableOrders.push(fullOrder);
-            }
-          });
+                if (orderData.orderCompleted === true) {
+                    return; 
+                }
+                // POPULATE CURRENT TASK
+                if (
+                    orderData.orderConfirmed === true &&
+                    orderData.courierId === courierId
+                ) {
+                    assignedOrder = fullOrder;
+                }
+                // POPULATE TASK LIST
+                else if (
+                    orderData.orderConfirmed === true &&
+                    orderData.courierId === ""
+                ) {
+                    availableOrders.push(fullOrder);
+                }
+            });
         }
-
-        setOrders(availableOrders);
-        setCurrentTask(assignedOrder);
-      } catch (err) {
+        return { availableOrders, assignedOrder };
+    } catch (err) {
         console.error("Error fetching orders:", err);
         setError("Failed to fetch orders.");
-      } finally {
-        setFetchingOrders(false);
-      }
-    };
-
-    if (courierData?.courierId) {
-      fetchAllOrders();
+        return { availableOrders: [], assignedOrder: null };
     }
-  }, [courierData]);
+  };
 
   // handleAccept 
   const handleAccept = async (order) => {
@@ -402,7 +445,7 @@ export default function CourierPage() {
         return;
     }
 
-    if (!window.confirm("Confirm that the Grab N Go user's orderId matches your current task?")) {
+    if (!window.confirm("Confirm that the Grab N Go user's orderId matches your task orderId?")) {
         return;
     }
 
@@ -519,45 +562,49 @@ export default function CourierPage() {
           <p>No current tasks.</p>
         )}
 
-        <hr className="my-8 border-t-2 border-gray-300" />
-        {/* Task List */}
-        <h2 className="text-xl font-semibold mb-4">📝 Task List</h2>
-        {fetchingOrders ? (
-          <p>Loading tasks…</p>
-        ) : orders.length === 0 ? (
-          <p>No tasks available.</p>
-        ) : (
-          <ul className="list-disc list-inside text-gray-600">
-            {orders.map((order, idx) => (
-              <li key={idx} className="p-4 mb-4 border rounded bg-gray-50">
-                <strong>Order ID:</strong> {order.orderId} <br />
-                <strong>Items:</strong>
-                <ul className="ml-4 list-disc">
-                  {order.items.map((item, i) => (
-                    <li key={i}>
-                      {item.name} × {item.quantity}
-                    </li>
-                  ))}
-                </ul>
-                <strong>Restaurant Address:</strong> {order.restaurantAddress} <br />
-                <strong>User Address:</strong> {order.userAddress}
-                <div className="mt-2 space‑x‑2">
-                  <button
-                    className="bg-green-500 text-white px-3 py-1 rounded"
-                    onClick={() => handleAccept(order)}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    className="bg-red-500 text-white px-3 py-1 rounded"
-                    onClick={() => handleReject(order)}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
+        {!currentTask && (
+          <>
+            <hr className="my-8 border-t-2 border-gray-300" />
+            <h2 className="text-xl font-semibold mb-4">📝 Task List</h2>
+            {fetchingOrders ? (
+              <p>Loading tasks…</p>
+            ) : orders.length === 0 ? (
+              <p>No tasks available.</p>
+            ) : (
+              <ul className="list-disc list-inside text-gray-600">
+                {orders.map((order, idx) => (
+                  <li key={idx} className="p-4 mb-4 border rounded bg-gray-50">
+                    <strong>Order ID:</strong> {order.orderId} <br />
+                    <strong>Items:</strong>
+                    <ul className="ml-4 list-disc">
+                      {order.items.map((item, i) => (
+                        <li key={i}>
+                          {item.name} × {item.quantity}
+                        </li>
+                      ))}
+                    </ul>
+                    <strong>Restaurant Address:</strong> {order.restaurantAddress} <br />
+                    <strong>User Address:</strong> {order.userAddress}
+                    <div className="mt-2 space-x-2">
+                      <button
+                        className="bg-green-500 text-white px-3 py-1 rounded"
+                        onClick={() => handleAccept(order)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="bg-red-500 text-white px-3 py-1 rounded"
+                        onClick={() => handleReject(order)}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </>
     ) : null}
