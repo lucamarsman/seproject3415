@@ -14,14 +14,15 @@ import {
   onSnapshot,
   serverTimestamp,
   writeBatch,
+  increment,
 } from "firebase/firestore";
 import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
 import { coordinateFormat } from "../utils/coordinateFormat.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
 import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 import { calculateEtaRestaurant } from "../utils/calculateEtaRestaurant.js";
-import BannerManager from "../components/RestaurantPage/bannerUpload.jsx";
 
+import InfoTab from "../components/RestaurantPage/infoTab";
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
 import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
@@ -36,8 +37,6 @@ function parseHoursArray(hoursArray) {
   });
   return result;
 }
-
-const phoneRegex = /^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/;
 
 function formatHoursForFirestore(hoursObject) {
   return Object.entries(hoursObject).map(([day, times]) => ({
@@ -146,6 +145,7 @@ export default function RestaurantPage() {
           address: "",
           autoSetting: "manual",
           createdAt: Timestamp.fromDate(new Date()),
+          earnings: 0,
           email: user.email,
           hours: [
             { Monday: { Opening: "0900", Closing: "1700" } },
@@ -445,6 +445,12 @@ export default function RestaurantPage() {
 
       const orderData = orderSnap.data();
       const totalPrepTime = orderData.totalPrepTime || 0;
+      //Update restaurant earnings
+      const restaurantRef = doc(db, "restaurants", restaurantData.id);
+      const paymentRestaurant = orderData.paymentRestaurant || 0; 
+      await updateDoc(restaurantRef, {
+        earnings: increment(paymentRestaurant),
+      });
       const currentTime = new Date();
       const confirmedTime = Timestamp.fromDate(currentTime);
       const estimatedTimeDate = new Date(currentTime.getTime());
@@ -636,198 +642,16 @@ export default function RestaurantPage() {
 
         {/* 1. Restaurant Info Tab (activeTab === "info") */}
         {activeTab === "info" && (
-          <>
-            <h2 className="text-2xl font-semibold mb-4">
-              General Information & Settings
-            </h2>
-
-            <div className="space-y-6">
-              <BannerManager restaurant={restaurantData} />
-            </div>
-
-            {/* Existing Restaurant Info Display */}
-            <div className="mt-6 bg-gray-100 p-4 rounded shadow">
-              <h3 className="text-xl font-semibold mb-2">Current Details</h3>
-              <p>
-                <strong>Restaurant ID:</strong> {restaurantData.restaurantId}
-              </p>
-              <p>
-                <strong>Created At:</strong>{" "}
-                {restaurantData.createdAt?.toDate
-                  ? restaurantData.createdAt.toDate().toLocaleString()
-                  : new Date(restaurantData.createdAt).toLocaleString()}
-              </p>
-              <p>
-                <strong>Email:</strong> {restaurantData.email}
-              </p>
-              <p>
-                <strong>Name:</strong> {restaurantData.name}
-              </p>
-              <p>
-                <strong>Address / Location:</strong> {restaurantData.address} /
-                Lat: {restaurantData.location?.latitude}, Lng:{" "}
-                {restaurantData.location?.longitude}
-              </p>
-              <p>
-                <strong>Rating:</strong> {restaurantData.rating}
-              </p>
-              <p>
-                <strong>Total Orders:</strong> {restaurantData.totalOrders}
-              </p>
-            </div>
-
-            {/* Form to edit restaurant info */}
-            <form
-              className="mt-6 space-y-4 max-w-md"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const form = e.target;
-                const storeName = form.storeName.value.trim();
-                const address = form.address.value.trim();
-                const phone = form.phone.value.trim();
-                const type = selectedType;
-
-                if (!phoneRegex.test(phone)) {
-                  alert(
-                    "Please enter a valid phone number (e.g. 123-456-7890)"
-                  );
-                  return;
-                }
-
-                try {
-                  // Assuming geocodeAddress, GeoPoint, formatHoursForFirestore are available
-                  const { lat, lng } = await geocodeAddress(address);
-                  const location = new GeoPoint(lat, lng);
-                  const formattedHours = formatHoursForFirestore(hoursState);
-
-                  const updated = {
-                    storeName,
-                    address,
-                    phone,
-                    type,
-                    location,
-                    hours: formattedHours,
-                  };
-
-                  const docRef = doc(db, "restaurants", restaurantData.id);
-                  await updateDoc(docRef, updated);
-
-                  setRestaurantData((prev) => ({ ...prev, ...updated }));
-                  alert("Restaurant info updated");
-                } catch (err) {
-                  console.error("Update restaurant error:", err);
-                  alert("Failed to update restaurant info");
-                }
-              }}
-            >
-              <h3 className="text-xl font-semibold pt-4">
-                Edit Restaurant Info
-              </h3>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Store Name
-                </label>
-                <input
-                  name="storeName"
-                  defaultValue={restaurantData.storeName || ""}
-                  required
-                  className="w-full border px-2 py-1 rounded mt-1"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Address
-                </label>
-                <input
-                  name="address"
-                  defaultValue={restaurantData.address || ""}
-                  required
-                  className="w-full border px-2 py-1 rounded mt-1"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Phone
-                </label>
-                <input
-                  name="phone"
-                  defaultValue={restaurantData.phone || ""}
-                  required
-                  className="w-full border px-2 py-1 rounded mt-1"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Type
-                </label>
-                {loadingTypes ? (
-                  <p className="text-sm text-gray-500">
-                    Loading cuisine types...
-                  </p>
-                ) : (
-                  <select
-                    name="type"
-                    value={selectedType}
-                    onChange={(e) => setSelectedType(e.target.value)}
-                    required
-                    className="w-full border px-2 py-1 rounded bg-white mt-1"
-                    disabled={cuisineTypes.length === 0}
-                  >
-                    <option value="" disabled>
-                      Select a cuisine type
-                    </option>
-                    {cuisineTypes.map((typeOption) => (
-                      <option key={typeOption} value={typeOption}>
-                        {typeOption}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <div className="mt-4 p-4 bg-white rounded shadow-inner">
-                <h3 className="font-semibold text-gray-800">
-                  Working Hours (HHMM format)
-                </h3>
-                {Object.entries(hoursState).map(
-                  ([day, { Opening, Closing }]) => (
-                    <div key={day} className="flex items-center gap-4 mb-2">
-                      <span className="w-20 font-medium text-sm">{day}</span>
-                      <input
-                        type="text"
-                        value={Opening}
-                        onChange={(e) =>
-                          setHoursState((prev) => ({
-                            ...prev,
-                            [day]: { ...prev[day], Opening: e.target.value },
-                          }))
-                        }
-                        placeholder="0900"
-                        className="border px-2 py-1 w-24 rounded text-sm"
-                      />
-                      <input
-                        type="text"
-                        value={Closing}
-                        onChange={(e) =>
-                          setHoursState((prev) => ({
-                            ...prev,
-                            [day]: { ...prev[day], Closing: e.target.value },
-                          }))
-                        }
-                        placeholder="1700"
-                        className="border px-2 py-1 w-24 rounded text-sm"
-                      />
-                    </div>
-                  )
-                )}
-              </div>
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full font-medium"
-              >
-                Save Info
-              </button>
-            </form>
-          </>
+          <InfoTab
+            restaurantData={restaurantData}
+            setRestaurantData={setRestaurantData}
+            cuisineTypes={cuisineTypes}
+            loadingTypes={loadingTypes}
+            db={db}
+            geocodeAddress={geocodeAddress}
+            formatHoursForFirestore={formatHoursForFirestore}
+            parseHoursArray={parseHoursArray}
+          />
         )}
 
         {/* 2. Menu Management Tab (activeTab === "menu") */}

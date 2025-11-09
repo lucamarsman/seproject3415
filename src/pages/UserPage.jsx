@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
+  addDoc,
   collection,
   updateDoc,
   GeoPoint,
@@ -10,6 +11,8 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
+  deleteDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { Navigate, useNavigate } from "react-router-dom";
@@ -466,6 +469,51 @@ export default function UserPage() {
       }
   };
 
+ const handleConfirmDelivery = async (orderId) => {
+    if (!userData?.id) {
+        console.error("User data is not available to confirm delivery.");
+        return;
+    }
+    
+    // Find the current order data from local state
+    const orderToUpdate = userOrders.find(o => o.orderId === orderId);
+    if (!orderToUpdate || !orderToUpdate.restaurantId) {
+        console.error("Order or restaurantId not found for confirmation:", orderId);
+        return;
+    }
+
+    // IMPORTANT: Create the final data object
+    const completedOrderData = {
+        ...orderToUpdate,
+        deliveryStatus: "Delivery confirmed.",
+        orderCompleted: true, 
+        deliveryConfirmed: true,
+        archivedAt: new Date(),
+    };
+    
+    // 1. Define Document References and Batch
+    const batch = writeBatch(db);    
+    const originalOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);    
+    const historyOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "orderHistory", orderId);
+    
+    try {
+        // --- 2. BATCH OPERATIONS ---        
+        batch.set(historyOrderRef, completedOrderData); 
+        batch.delete(originalOrderRef);
+        await batch.commit();
+
+        console.log(`Order ${orderId} successfully archived and deleted from active orders.`);
+
+        // --- 3. LOCAL STATE UPDATE ---
+        setUserOrders(prev => prev.filter(o => o.orderId !== orderId));
+        
+    } catch (error) {
+        // Log the error to see if it was a network issue or a data error
+        console.error("Atomic confirmation/archiving failed:", error); 
+        alert("Failed to confirm delivery and archive order. Please check the console.");
+    }
+  };
+
   if (loading || fetchingUser) return <div>Loading...</div>;
 
   if (error)
@@ -490,6 +538,8 @@ export default function UserPage() {
           handleUserReply={handleUserReply}
           userId={userData?.id}
           userName={userData.name}
+          handleConfirmDelivery={handleConfirmDelivery}
+          Timestamp={Timestamp}
         />}
 
         {activeTab === "settings" && (

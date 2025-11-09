@@ -174,7 +174,7 @@ export default function OrdersTab({
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex-grow pr-4"> 
                         <p><strong>Status:</strong>{" "}<span className="font-medium text-red-600">{order.deliveryStatus}</span></p>
-                        <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                        <p className="mb-2"><strong>Grab N Go Payout:</strong> ${Number(order.paymentRestaurant ?? 0).toFixed(2)}</p>
                         <OrderItemDetails order={order} />
                       </div>
 
@@ -269,7 +269,7 @@ export default function OrdersTab({
                     {order.deliveryStatus}
                   </span>
                </p>
-                <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                <p className="mb-2"><strong>Grab N Go Payout:</strong> ${Number(order.paymentRestaurant ?? 0).toFixed(2)}</p>
                 <div className="border-b pb-2 mb-3"> 
                   <OrderItemDetails order={order} />
                 </div>
@@ -307,7 +307,7 @@ export default function OrdersTab({
                     {order.deliveryStatus}
                   </span>
                </p>
-                <p className="mb-2"><strong>Total:</strong> ${Number(order.payment ?? 0).toFixed(2)}</p>
+                <p className="mb-2"><strong>Grab N Go Payout:</strong> ${Number(order.paymentRestaurant ?? 0).toFixed(2)}</p>
                 <div className="border-b pb-2 mb-3"> 
                   <OrderItemDetails order={order} />
                 </div>

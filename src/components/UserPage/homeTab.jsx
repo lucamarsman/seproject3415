@@ -120,17 +120,16 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
   return (
     <>
       {confirmedOrders.map((order) => {
-        const restaurantCoords = [
-          order.restaurantLocation.latitude,
-          order.restaurantLocation.longitude,
-        ];
+        const restaurantCoords = [order.restaurantLocation.latitude, order.restaurantLocation.longitude];
         const userCoords = userLatLng;
-        const liveLocation =
-          liveCourierLocations[order.courierId] || order.courierLocation;
+        const liveLocation = liveCourierLocations[order.courierId] || order.courierLocation;
         const courierCoords = [liveLocation.latitude, liveLocation.longitude];
         const pathColor = stringToColor(order.orderId);
-        const polylinePositions = [restaurantCoords, courierCoords, userCoords];
-
+        
+        const polylinePositions = order.courierPickedUp
+            ? [courierCoords, userCoords]
+            : [restaurantCoords, courierCoords, userCoords];
+            
         return (
           <React.Fragment key={order.orderId}>
             {
@@ -138,14 +137,14 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
                 positions={polylinePositions}
                 pathOptions={{
                   color: pathColor,
-                  weight: 3,
+                  weight: 2,
                   dashArray: "10, 5",
                 }}
               />
             }
             <CircleMarker
               center={courierCoords}
-              radius={8}
+              radius={6}
               pathOptions={{
                 color: pathColor,
                 fillColor: pathColor,

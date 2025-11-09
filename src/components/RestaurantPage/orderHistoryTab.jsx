@@ -61,10 +61,10 @@ export default function OrderHistoryTab({ loadingOrders, allOrders = [] }) {
         )}
       </div>
 
-      {/* --- COMPLETED / PICKED-UP ORDERS --- */}
+      {/* --- order != completed or confirmed "enroute orders" --- */}
       <div className="mt-10">
         <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">
-          Courier Picked Up Orders ({R_completedOrders.length})
+          Recent History ({R_completedOrders.length})
         </h3>
         {loadingOrders ? (
           <p>Loading orders…</p>

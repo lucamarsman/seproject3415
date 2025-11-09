@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, getAuth } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, GeoPoint, Timestamp, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, Timestamp, increment } from "firebase/firestore";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { coordinateFormat } from "../utils/coordinateFormat.js";
@@ -10,6 +10,8 @@ import { isRestaurantAcceptingOrders } from "../utils/isRestaurantAcceptingOrder
 import defaultImage from "../assets/defaultImgUrl.png";
 
 const DEFAULT_IMAGE_URL = defaultImage;
+const PLATFORM_COMMISSION_RATE = 0.25;
+const COURIER_SHARE_OF_COMMISSION = 0.5;
 
 export default function OrderPage() {
   const location = useLocation();
@@ -20,6 +22,7 @@ export default function OrderPage() {
   // Existing state
   const [quantities, setQuantities] = useState({});
   const [total, setTotal] = useState(0);
+  const [customerTip, setCustomerTip] = useState(0);
   const [userId, setUserId] = useState(null);
   const [userData, setUserData] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -80,7 +83,7 @@ export default function OrderPage() {
       }
     });
     
-    setTotal(newTotal);
+    setTotal(newTotal); //divide this up into // paymentCourier , // paymentPlatform , //paymentRestaurant
   }, [quantities, restaurant, selectedModifications]);
 
 
@@ -138,6 +141,15 @@ export default function OrderPage() {
     });
   };
 
+  const handleTipChange = (value) => {
+    const tip = parseFloat(value);
+    if (!isNaN(tip) && tip >= 0) {
+      setCustomerTip(tip);
+    } else if (value === "") {
+      setCustomerTip(0);
+    }
+  };
+
   // handleSubmitOrder (Updated to include global notes)
   const handleSubmitOrder = async () => {
     if (isSubmitting) {
@@ -163,6 +175,12 @@ export default function OrderPage() {
       setIsSubmitting(false);
       return;
     }
+    //Payment portions of platform, restaurant, and courier
+    const commissionAmount = total * PLATFORM_COMMISSION_RATE;
+    const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
+    const paymentRestaurant = total - commissionAmount;
+    const paymentCourier  = COURIER_BASE_PAY + customerTip;
+    const paymentPlatform = commissionAmount - COURIER_BASE_PAY; 
 
     if (!userData?.deliveryLocation) {
       alert("Missing user location.");
@@ -217,19 +235,23 @@ export default function OrderPage() {
       const newOrder = {
         createdAt: createdAt,
         courierArray: [],
-        courierRejectArray: [],
+        //courierRejectArray: [], //preventing too many read/writes
         courierConfirmed: false,
         courierPickedUp: false,
         courierId: "",
         orderTimeout: orderTimeout,
-        deliveryStatus: "Awaiting restaurant confirmation.",
+        deliveryStatus: "Awaiting restaurant confirmation.", //
+        deliveryConfirmed: false, //
+        orderCompleted: false, //
         orderConfirmed: null,
-        orderCompleted: false,
         orderId,
         restaurantId,
         userId,
         items,
         payment: total,
+        paymentCourier: paymentCourier , //
+        paymentPlatform: paymentPlatform, //
+        paymentRestaurant: paymentRestaurant, //
         totalPrepTime,
         confirmedTime: null,
         estimatedDeliveryTime: null,
@@ -237,6 +259,7 @@ export default function OrderPage() {
         estimatedPreppedTime: null,
         restaurantAddress: restaurant.address || "",
         restaurantLocation: coordinateFormat(restaurant.location),
+        storeName: restaurant.storeName,
         userAddress: userData.address,
         userLocation: coordinateFormat(userData.deliveryLocation),
         restaurantNote: restaurantNote,

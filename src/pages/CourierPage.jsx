@@ -254,7 +254,6 @@ export default function CourierPage() {
     const courierId = courierData?.id;
     if (!courierId || !navigator.geolocation) return;
     const currentOrders = orders;
-
     const fetchAndWriteLocation = async () => {
         if (locationAccessDenied) return;
 
@@ -262,7 +261,7 @@ export default function CourierPage() {
             async (position) => {
                 const { latitude, longitude } = position.coords;
                 const formattedLocation = { latitude, longitude };
-                console.log(formattedLocation);
+                //console.log(formattedLocation);
                 
                 // 1. LOCATION UPDATE (Always runs)
                 setCourierData((prev) => ({
@@ -415,6 +414,7 @@ export default function CourierPage() {
     }
   };
 
+  /*
   const handleReject = async (order) => {
     try {
       const orderDocRef = doc(
@@ -426,13 +426,23 @@ export default function CourierPage() {
       );
       await updateDoc(orderDocRef, {
         courierConfirmed: false,
-        courierRejectArray: courierData.courierId,
+        //courierRejectArray: courierData.courierId,
       });
       setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
     } catch (err) {
       console.error("Error rejecting order:", err);
       setError("Failed to reject order.");
     }
+  };*/
+
+  const formatItemsForMessage = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return "your order items";
+
+    const formattedItems = items.map(item => 
+      `${item.quantity}x ${item.name}`
+    ).join(", ");
+  
+    return formattedItems;
   };
 
   const handleUserExchange = async (orderId) => {
@@ -453,20 +463,38 @@ export default function CourierPage() {
         const batch = writeBatch(db);
         const orderRef = doc(db, "restaurants", task.restaurantId, "restaurantOrders", orderId);
         const courierRef = doc(db, "couriers", courierData.id);
+        const userRef = collection(db, "users", task.userId, "messages");
+        const systemRef = doc(db, "systemFiles", "systemVariables");
         
-        const paymentAmount = Number(task.payment) || 0; 
+        const paymentCourier = Number(task.paymentCourier) || 0; 
+        const paymentPlatform = Number(task.paymentPlatform) || 0; // Retrieve platform payment
 
         batch.update(orderRef, {
           courierId: "",
+          deliveryStatus: "Delivery complete.", //may not write
           orderCompleted: true,
-          deliveryStatus: "Delivery complete.",
           completedBy: courierData.id,
           completedAt: Timestamp.fromDate(new Date()),
         });
 
         batch.update(courierRef, {
             currentTask: "",
-            earnings: increment(paymentAmount),
+            earnings: increment(paymentCourier),
+        });
+
+        // --- SEND Message to Customer (Conditional on userId) ---
+        await addDoc(userRef, { 
+          createdAt: Timestamp.fromDate(new Date()), 
+          message:
+            `Order ${orderId} from ${task.storeName} , containing ${formatItemsForMessage(task.items)}, has been delivered. 
+            Total paid: $${Number(task.payment).toFixed(2)}. Thank you for choosing Grab N Go.`,
+          read: false,
+          type: "order_status",
+          orderId: orderId,
+        });
+        
+        batch.update(systemRef, {
+            earnings: increment(paymentPlatform),
         });
       
         await batch.commit();
@@ -474,7 +502,7 @@ export default function CourierPage() {
         setCurrentTask(null);
         setCourierData(prev => ({
             ...prev,
-            earnings: (prev.earnings || 0) + paymentAmount,
+            earnings: (prev.earnings || 0) + paymentCourier,
             currentTask: "",
         }));
 
@@ -538,6 +566,7 @@ export default function CourierPage() {
           <section className="mb-8">
             <div className="p-4 border rounded bg-gray-100">
               <p><strong>Order ID:</strong> {currentTask.orderId}</p>
+              <p><strong>Payout:</strong> ${currentTask.paymentCourier.toFixed(2)}</p>
               <strong>Items:</strong>
                 <ul className="ml-4 list-disc">
                   {currentTask.items?.map((item, i) => (
@@ -576,6 +605,7 @@ export default function CourierPage() {
                 {orders.map((order, idx) => (
                   <li key={idx} className="p-4 mb-4 border rounded bg-gray-50">
                     <strong>Order ID:</strong> {order.orderId} <br />
+                    <p><strong>Payout:</strong> ${Number(order?.paymentCourier).toFixed(2)}</p>
                     <strong>Items:</strong>
                     <ul className="ml-4 list-disc">
                       {order.items.map((item, i) => (
@@ -591,14 +621,15 @@ export default function CourierPage() {
                         className="bg-green-500 text-white px-3 py-1 rounded"
                         onClick={() => handleAccept(order)}
                       >
-                        Accept
+                        Accept Task
                       </button>
+                      {/*
                       <button
                         className="bg-red-500 text-white px-3 py-1 rounded"
                         onClick={() => handleReject(order)}
                       >
                         Reject
-                      </button>
+                      </button>*/}
                     </div>
                   </li>
                 ))}
@@ -616,15 +647,7 @@ export default function CourierPage() {
 TODO
 *** For an order to appear
       -> orderData.orderConfirmed === true && orderData.courierId === "" && courierId in courierArray [DONE]
-      -> add order "payment" [total, restaurant, courier, system] field to order; need an algorithm to divide up payment
       -> only show payment/courier on the task (incentive to accept); likewise for restaurantPage; likewise for admin record
-*** 4. Add an "Accept" or "Reject" button next to 1 task 
-      -> to accept, courier/{courierId} field currentTask must be ""; if not alert -> "You must complete your current task before accepting a new one"
-      -> If accept, courierId added to order form courierId field [DONE]  && (gps must be active)
-      -> After accepting task moves under current task header, courierCurrent task = orderId [DONE]
-      -> Car icon appears on user's map according to courier gps
-      -> If reject, courierId added to courierRejectArray, another courier must pick it up [DONE]
-      -> Later: a new task is offered under Task List (to limit preferential choices)
 
 *** 5. Courier presses "Picked up" button when within a close gps radius -> deliveryStatus: "order being delivered" (if restaurant doesn't)
 *** 6. Courier presses "Delivered" button when within a close gps radius -> deliveryStatus: "completed"

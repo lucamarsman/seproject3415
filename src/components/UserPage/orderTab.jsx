@@ -7,11 +7,10 @@ export default function OrdersTab({
     handleUserReply, 
     userId,
     userName,
-    Timestamp 
+    Timestamp,
+    handleConfirmDelivery
 }) {
-    // 1. State to manage the user's reply text for each order ID
     const [replyText, setReplyText] = useState({});
-    // State to manage loading state (e.g., while saving to Firestore)
     const [isSaving, setIsSaving] = useState({});
     
     // --- FORMATTING FUNCTIONS ---
@@ -21,6 +20,13 @@ export default function OrdersTab({
         }
         return "TBD";
     };
+
+    const handleConfirmation = async (orderId) => {
+        console.log(`User confirming delivery for order: ${orderId}`);
+        if (handleConfirmDelivery) {
+            await handleConfirmDelivery(orderId);
+        }
+    }
 
     // 2. Local Reply Handler (Logic remains the same)
     const handleLocalReply = async (orderId, currentNotes, replyContent) => {
@@ -32,7 +38,6 @@ export default function OrdersTab({
 
         setIsSaving(prev => ({ ...prev, [orderId]: true }));
         
-        // --- TIMEOUT LOGIC ---
         const newTimeoutMillis = Date.now() + REPLY_TIMEOUT_EXTENSION_MS;
         const newOrderTimeout = Timestamp 
             ? Timestamp.fromDate(new Date(newTimeoutMillis)) 
@@ -41,7 +46,6 @@ export default function OrdersTab({
         
         let userNote = `${userName} (${timeString}): ${trimmedReply}`;
         
-        // Prepare the new notes array (append the new note)
         const newNotes = [...(Array.isArray(currentNotes) ? currentNotes : []), userNote];
 
         try {
@@ -78,6 +82,7 @@ export default function OrdersTab({
                 let estimatedDeliveryTime = null;
                 const saving = isSaving[orderId];
                 const canReply = order.orderConfirmed !== true; 
+                const canConfirm = order.orderCompleted == true;
                 const containerClassName = order.orderConfirmed === true
                     ? "border-2 border-green-500 rounded p-4 bg-green-50 shadow-md"
                     : "border rounded p-4 bg-yellow-50 border-yellow-300 text-yellow-800 shadow-sm";
@@ -182,6 +187,16 @@ export default function OrdersTab({
                                     {saving ? 'Sending Message...' : 'Send Message'}
                                 </button>
                             </div>
+                        )}
+                        {canConfirm && (
+                        <div>
+                            <button
+                            onClick={() => handleConfirmation(orderId)}
+                            className="mt-3 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+                            >
+                            Confirm Delivery
+                            </button>
+                        </div>
                         )}
                     </div>
                 );
