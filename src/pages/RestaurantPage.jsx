@@ -184,13 +184,71 @@ export default function RestaurantPage() {
     fetchOrCreate();
   }, [user]);
 
-  // --- Realtime listener for restaurantOrders (Initial load + updates)
-  const ordersRef = useRef(orders); // Ref to hold the mutable 'orders' state
+  // Realtime listener for restaurantOrders
+  const ordersRef = useRef(orders);
 
+  // Update the ref whenever the 'orders' state changes
   useEffect(() => {
-    // Update the ref whenever the 'orders' state changes
     ordersRef.current = orders;
   }, [orders]);
+
+  // Archiving collection restaurantOrders orders to collection orderHistory (in the case the user does not press button "Confirm Delivery" - optional)
+  const archiveOldOrders = async (ordersToProcess, restaurantId) => {
+    if (!restaurantId) return;
+    const ONE_HOUR_MS = 1 * 60 * 60 * 1000;
+    const currentTime = new Date().getTime();
+    console.log(currentTime);
+
+    const oldOrdersToArchive = ordersToProcess.filter((order) => {
+        // --- Case A: orderCompleted = true and 1+ hours old (Courier delivered) ---
+        const isOldCompleted = 
+            order.orderCompleted === true && 
+            order.completedAt?.toDate?.() &&
+            (currentTime - order.completedAt.toDate().getTime()) > ONE_HOUR_MS;
+
+        // --- Case B: orderConfirmed = false and 1+ hours old (Rejected by restaurant/timeout) ---
+        const isOldRejected = 
+            order.orderConfirmed === false && 
+            order.createdAt?.toDate?.() &&
+            (currentTime - order.createdAt.toDate().getTime()) > ONE_HOUR_MS;
+            
+        // Return true if either case is met
+        return isOldCompleted || isOldRejected;
+    });
+
+    if (oldOrdersToArchive.length === 0) {
+        console.log("No old orders to archive.");
+        return;
+    }
+    const batch = writeBatch(db);
+    const archivedOrderIds = [];
+
+    for (const order of oldOrdersToArchive) {
+        const orderId = order.orderId;
+        // 1. Define Document References
+        const originalOrderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
+        const historyOrderRef = doc(db, "restaurants", restaurantId, "orderHistory", orderId);
+        
+        // 2. Prepare Data for History
+        const historyData = {
+            ...order,
+            archivedAt: serverTimestamp(),
+        };
+
+        // A. Copy: Use batch.set to create the document in history with the same ID
+        batch.set(historyOrderRef, historyData);
+        batch.delete(originalOrderRef);
+        archivedOrderIds.push(orderId);
+    }
+    
+    try {
+        await batch.commit();         
+        setOrders(prev => prev.filter(o => !archivedOrderIds.includes(o.orderId)));
+        console.log(`✅ Successfully archived and deleted old orders: ${archivedOrderIds.join(', ')}`);
+    } catch (error) {
+        console.error("Batch archiving of old orders failed:", error);
+    }
+  };
 
   // Realtime listener. UPDATES: orderConfirmed, estimatedPickUpTime, estimatedPreppedTime
   useEffect(() => {
@@ -206,7 +264,7 @@ export default function RestaurantPage() {
     let firstLoad = true;
 
     // PROCESSING FUNCTION
-    const processOrders = async (ordersArray) => {
+    const processOrders = async (ordersArray) => {      
       // 1. COURIER TRACKING AND ETA CALCULATION (activeOrders only)
       const activeOrders = ordersArray.filter(
         (order) =>
@@ -239,9 +297,6 @@ export default function RestaurantPage() {
             }
           })
         );
-
-        // Loop through active orders to calculate ETA
-
         // Loop through active orders to calculate ETA
         for (const order of activeOrders) {
           const courier = courierDataMap.get(order.courierId);
@@ -277,7 +332,6 @@ export default function RestaurantPage() {
           let newDeliveryStatus;
 
           if (locationValid) {
-            // --- CORE LOGIC: Use the shared utility function ---
             updates = calculateEtaRestaurant(
               {
                 courierLoc: courierLocation,
@@ -342,7 +396,7 @@ export default function RestaurantPage() {
         }
       }
 
-      // --- 2. EXISTING TIMEOUT REJECTION LOGIC (unchanged) ---
+      // --- 2. EXISTING TIMEOUT REJECTION LOGIC ---
       const now = new Date();
       const timedOutOrders = ordersArray.filter((order) => {
         const timeout =
@@ -411,8 +465,9 @@ export default function RestaurantPage() {
         if (firstLoad) setLoadingOrders(false);
       }
     );
+    
 
-    // 2️⃣ INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
+    // 2. INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
     const interval = setInterval(() => {
       const currentOrders = ordersRef.current;
       if (currentOrders.length === 0) return;
@@ -471,7 +526,7 @@ export default function RestaurantPage() {
           const cLng = cData.location.longitude;
 
           const distKm = getDistanceInKm(restLat, restLng, cLat, cLng);
-          if (distKm <= 50) {
+          if (distKm <= 1) { //set to 50
             courierArray.push(courierDoc.id);
           }
         }
@@ -485,8 +540,6 @@ export default function RestaurantPage() {
         confirmedTime: confirmedTime,
         estimatedPreppedTime: estimatedPreppedTime,
       });
-
-      //
 
       setOrders((prev) =>
         prev.map((o) =>
@@ -612,12 +665,15 @@ export default function RestaurantPage() {
   if (error)
     return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
 
+  //Restaurant orderTab heading: New Orders
   const unhandledOrders = orders.filter(
     (order) => order.orderConfirmed == null
   );
+  //Restaurant orderTab heading: Confirmed Orders
   const confirmedOrders = orders.filter(
     (order) => order.orderConfirmed === true && order.courierConfirmed === false
   );
+  //Restaurant orderTab heading: Confirmed Confirmed Orders
   const courierConfirmedOrders = orders.filter(
     (order) =>
       order.courierConfirmed === true && order.courierPickedUp === false
@@ -678,10 +734,12 @@ export default function RestaurantPage() {
           />
         )}
         {/* 4. Order History Tab (activeTab === "orderHistory") 
-      This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager && C. Courier picked-up
-      */}
+        This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager && C. Courier picked-up
+        */}
         {activeTab === "orderHistory" && (
-          <OrderHistoryTab loadingOrders={loadingOrders} allOrders={orders} />
+          <OrderHistoryTab loadingOrders={loadingOrders} allOrders={orders}
+          onArchiveClick={() => archiveOldOrders(orders, restaurantData.id)}
+          />
         )}
 
         {/* 5. Settings Tab (activeTab === "settings") */}

@@ -467,10 +467,9 @@ export default function CourierPage() {
         const systemRef = doc(db, "systemFiles", "systemVariables");
         
         const paymentCourier = Number(task.paymentCourier) || 0; 
-        const paymentPlatform = Number(task.paymentPlatform) || 0; // Retrieve platform payment
+        const paymentPlatform = Number(task.paymentPlatform) || 0;
 
         batch.update(orderRef, {
-          courierId: "",
           deliveryStatus: "Delivery complete.", //may not write
           orderCompleted: true,
           completedBy: courierData.id,

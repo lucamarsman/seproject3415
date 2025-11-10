@@ -1,10 +1,10 @@
 import React from "react";
 
 const formatOrderTimestamp = (timestamp) => {
-    return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
+  return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
 };
 
-export default function OrderHistoryTab({ loadingOrders, allOrders = [] }) {
+export default function OrderHistoryTab({ loadingOrders, allOrders = [], onArchiveClick }) {
   const rejectedOrders = allOrders.filter((order) => order.orderConfirmed === false);
   const R_completedOrders = allOrders.filter((order) => order.courierPickedUp === true);
 
@@ -13,11 +13,18 @@ export default function OrderHistoryTab({ loadingOrders, allOrders = [] }) {
       <h2 className="text-2xl font-semibold mb-4">
         Order History ({rejectedOrders.length + R_completedOrders.length} Total)
       </h2>
+      <button
+            type="button"
+            onClick={onArchiveClick}
+            className="mt-3 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+        >
+            Archive Orders
+        </button>
 
       {/* --- REJECTED/TIMED-OUT ORDERS --- */}
       <div className="mt-6">
         <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">
-          Rejected / Timed-Out Orders ({rejectedOrders.length})
+          Recent Rejected / Timed-Out Orders ({rejectedOrders.length})
         </h3>
         {loadingOrders ? (
           <p>Loading orders…</p>
