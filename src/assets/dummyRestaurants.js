@@ -16,6 +16,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-photo/tasty-pepperoni-pizza-cooking-ingredients-600nw-1233657127.jpg"
   },
   {
     id: "d2",
@@ -34,6 +35,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2200" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://images7.alphacoders.com/138/1383386.png"
   },
   {
     id: "d3",
@@ -52,6 +54,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://t3.ftcdn.net/jpg/07/58/26/62/360_F_758266271_yksdY7RLYIIY6jofjJorjylEDOvgcuze.jpg"
   },
   {
     id: "d4",
@@ -70,6 +73,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1000", Closing: "2100" } },
       { Sunday: { Opening: "1000", Closing: "1900" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-photo/vegetarian-food-background-organic-healthy-260nw-658524046.jpg"
   },
   {
     id: "d5",
@@ -88,6 +92,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-photo/selection-various-barbecued-gourmet-meats-600nw-1697102809.jpg"
   },
   {
     id: "d6",
@@ -106,6 +111,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://media.istockphoto.com/id/618041312/photo/asian-food-background-with-various-of-cooking-ingredients.jpg?s=612x612&w=0&k=20&c=g7xgQYx5ek0pFePDkrO92jAleUvPWEv3QVik2BhXpPY="
   },
   {
     id: "d7",
@@ -124,6 +130,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1100", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://wallpapercave.com/wp/wp10522712.jpg"
   },
   {
     id: "d8",
@@ -142,6 +149,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2000" } },
     ],
+    bannerUrl: "https://t4.ftcdn.net/jpg/02/66/79/95/360_F_266799582_bOxik6RVdIMjmXx8LDBWD6nycVbYbTq3.jpg"
   },
   {
     id: "d9",
@@ -160,6 +168,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1000", Closing: "0000" } },
       { Sunday: { Opening: "1000", Closing: "2200" } },
     ],
+    bannerUrl: "https://t4.ftcdn.net/jpg/06/74/89/51/360_F_674895167_BekzmbraYyBqFOzyAdozexC2liKjbEm2.jpg"
   },
   {
     id: "d10",
@@ -178,6 +187,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1700", Closing: "2330" } },
       { Sunday: { Opening: "1700", Closing: "2200" } },
     ],
+    bannerUrl: "https://thumbs.dreamstime.com/b/banner-table-restaurant-variety-food-blurred-background-copy-space-banner-table-restaurant-328523067.jpg"
   },
   {
     id: "d11",
@@ -196,6 +206,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://static.vecteezy.com/system/resources/previews/027/101/663/non_2x/arabic-and-middle-eastern-food-displayed-on-a-dinner-table-the-meal-includes-meat-kebab-hummus-free-photo.jpg"
   },
   {
     id: "d12",
@@ -214,6 +225,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1000", Closing: "2200" } },
       { Sunday: { Opening: "1000", Closing: "2000" } },
     ],
+    bannerUrl: "https://png.pngtree.com/thumb_back/fh260/background/20250810/pngtree-a-vibrant-display-of-indian-dishes-including-chicken-kachli-biryani-rice-image_17876422.webp"
   },
   {
     id: "d13",
@@ -232,6 +244,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1000", Closing: "2300" } },
       { Sunday: { Opening: "1000", Closing: "2100" } },
     ],
+    bannerUrl: "https://prairiedonair.com/wp-content/uploads/2025/05/banner.jpg"
   },
   {
     id: "d14",
@@ -250,6 +263,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://theburritobros.ca/wp-content/uploads/2025/04/burrito-banner2.jpg"
   },
   {
     id: "d15",
@@ -268,6 +282,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2200" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://t3.ftcdn.net/jpg/17/66/67/22/360_F_1766672263_WniTuVZbcokXzfFZptJQfrnkgI8HTull.jpg"
   },
   {
     id: "d16",
@@ -286,6 +301,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1600", Closing: "0000" } },
       { Sunday: { Opening: "1600", Closing: "2300" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-vector/chalkboard-doodle-food-banner-cafe-260nw-1221644917.jpg"
   },
   {
     id: "d17",
@@ -304,6 +320,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1100", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://img.freepik.com/free-psd/food-menu-restaurant-facebook-cover-banner-template_120329-6334.jpg?semt=ais_hybrid&w=740&q=80"
   },
   {
     id: "d18",
@@ -322,6 +339,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2000" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-photo/taco-bar-corner-border-assortment-260nw-1945652281.jpg"
   },
   {
     id: "d19",
@@ -340,6 +358,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1100", Closing: "0000" } },
       { Sunday: { Opening: "1200", Closing: "2200" } },
     ],
+    bannerUrl: "https://t4.ftcdn.net/jpg/02/09/64/33/360_F_209643310_7tdlZx6oMF9iPqnt2PzbXdfYTNKGohdm.jpg"
   },
   {
     id: "d20",
@@ -358,6 +377,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "0800", Closing: "1400" } },
       { Sunday: { Opening: "0800", Closing: "1400" } },
     ],
+    bannerUrl: "https://www.shutterstock.com/image-illustration/wooden-3d-wallpaper-cafe-restaurant-600nw-2151039519.jpg"
   },
   {
     id: "d21",
@@ -376,6 +396,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1100", Closing: "2200" } },
       { Sunday: { Opening: "1100", Closing: "2000" } },
     ],
+    bannerUrl: "https://img.freepik.com/premium-photo/vietnamese-pho-bowl-with-steaming-broth-beef-from-concept-food-photography-asian-cuisine-noodles-authentic-food-steaming-hot-dish_864588-159682.jpg"
   },
   {
     id: "d22",
@@ -394,6 +415,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://static.vecteezy.com/system/resources/thumbnails/072/298/676/small/rotating-grilled-meat-on-a-vertical-rotisserie-at-night-photo.jpg"
   },
   {
     id: "d23",
@@ -412,6 +434,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1200", Closing: "2300" } },
       { Sunday: { Opening: "1200", Closing: "2100" } },
     ],
+    bannerUrl: "https://img.freepik.com/free-vector/hand-drawn-korean-restaurant-facebook-cover_23-2149682489.jpg?semt=ais_hybrid&w=740&q=80"
   },
   {
     id: "d24",
@@ -430,6 +453,7 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "1000", Closing: "2100" } },
       { Sunday: { Opening: "1000", Closing: "1900" } },
     ],
+    bannerUrl: "https://irp.cdn-website.com/7d750e30/dms3rep/multi/LoadedP_BOYB1_V2.jpg?dm-skip-opt=true"
   },
   {
     id: "d25",
@@ -448,5 +472,6 @@ export const dummyRestaurants = [
       { Saturday: { Opening: "0800", Closing: "1400" } },
       { Sunday: { Opening: "0800", Closing: "1400" } },
     ],
+    bannerUrl: "https://dartington-estate.transforms.svdcdn.com/production/images/Food/Montreal-Bagels-1.jpeg?w=1200&h=600&auto=compress%2Cformat&fit=crop&dm=1741694718&s=c33f14b0b12be3a8379653127377745a"
   },
 ];
