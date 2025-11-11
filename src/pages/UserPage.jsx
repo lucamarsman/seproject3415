@@ -62,6 +62,7 @@ export default function UserPage() {
   const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
+  const [profileImgInput, setProfileImgInput] = useState("");
     
   const clearFormMessages = () => {
     setFormError("");
@@ -122,6 +123,7 @@ export default function UserPage() {
           setEmailInput(userDoc?.email || user.email || "");
           setPhoneInput(userDoc.phone || "");
           setAddressInput(userDoc.address || "");
+          setProfileImgInput(userDoc.profileImg || "");
           setFetchingUser(false);
           return;
         }
@@ -134,12 +136,14 @@ export default function UserPage() {
           deliveryLocation: new GeoPoint(44.413922, -79.707506),
           phone: "",
           address: "",
+          profileImg: null,
         };
 
         await setDoc(userRef, newUser); // uses UID as document ID
 
         setUserData({ id: uid, ...newUser });
         setAddressInput("");
+        setProfileImgInput("");
         setFetchingUser(false);
       } catch (err) {
         console.error("Error fetching or creating user:", err);
@@ -162,7 +166,7 @@ export default function UserPage() {
 
         setAllRestaurants([...fetched, ...dummyRestaurants]);
         // Artificial delay for ux testing
-+       setTimeout(() => setRestaurantsLoading(false), 600);
+        setTimeout(() => setRestaurantsLoading(false), 600);
       } catch (err) {
         console.error("Error fetching restaurants:", err);
         setTimeout(() => setRestaurantsLoading(false), 600);
@@ -370,6 +374,7 @@ export default function UserPage() {
     setEmailInput(userData.email || user?.email || "");
     setPhoneInput(userData.phone || "");
     setAddressInput(userData.address || "");
+    setProfileImgInput(userData.profileImg || "");
   }, [activeTab, userData, user]);
 
   // Reset scroll when switching tabs or applying filters/search
@@ -435,6 +440,7 @@ export default function UserPage() {
         email: emailInput.trim(), // stored in users doc (not Auth)
         phone: phoneInput.trim(),
         address: addressInput.trim(),
+        profileImg: profileImgInput.trim() || null,
         ...(lat && lng ? { deliveryLocation: new GeoPoint(lat, lng) } : {}),
       };
 
@@ -581,7 +587,7 @@ export default function UserPage() {
 
       {activeTab === "settings" && (
         <SettingTab
-          defaultProfileImg={defaultProfileImg}
+          defaultProfileImg={userData?.profileImg || defaultProfileImg}
           editIcon={editIcon}
           nameInput={nameInput}
           setNameInput={setNameInput}
@@ -596,6 +602,8 @@ export default function UserPage() {
           formError={formError}
           formSuccess={formSuccess}
           onClearMessages={clearFormMessages}
+          profileImgInput={profileImgInput}     
+          setProfileImgInput={setProfileImgInput}
         />
       )}
 
