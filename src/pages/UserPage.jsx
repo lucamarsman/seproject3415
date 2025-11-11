@@ -25,10 +25,16 @@ import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
 import HomeTab from "../components/UserPage/homeTab";
-import MessageTab from "../components/UserPage/messageTab";
+import MessagesTab from "../components/UserPage/messageTab";
 import SettingTab from "../components/UserPage/settingTab";
 import OrderTab from "../components/UserPage/orderTab";
 import Sidebar from "../components/UserPage/sideBar";
+import UserPageSkeleton from "../components/UserPageSkeleton";
+import HomeTabSkeleton from "../components/HomeTabSkeleton.jsx";
+import OrdersTabSkeleton from "../components/OrderTabSkeleton.jsx";
+import MessagesTabSkeleton from "../components/MessagesTabSkeleton";
+import SettingsTabSkeleton from "../components/SettingsTabSkeleton";
+
 
 import { dummyRestaurants } from "../assets/dummyRestaurants.js";
 
@@ -54,6 +60,8 @@ export default function UserPage() {
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
   const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
+  const [restaurantsLoading, setRestaurantsLoading] = useState(true);
+  const [tabLoading, setTabLoading] = useState(false);
     
   const clearFormMessages = () => {
     setFormError("");
@@ -148,12 +156,16 @@ export default function UserPage() {
 
     (async () => {
       try {
+        setRestaurantsLoading(true);
         const snap = await getDocs(collection(db, "restaurants"));
         const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         setAllRestaurants([...fetched, ...dummyRestaurants]);
+        // Artificial delay for ux testing
++       setTimeout(() => setRestaurantsLoading(false), 600);
       } catch (err) {
         console.error("Error fetching restaurants:", err);
+        setTimeout(() => setRestaurantsLoading(false), 600);
       }
     })();
   }, [user]);
@@ -370,6 +382,19 @@ export default function UserPage() {
     }
   }, [activeTab, filters.openNow, filters.sort, searchTerm, filters.types]);
 
+  // Use effect for tracking tab loading state
+  useEffect(() => {
+  if (loading || fetchingUser) return;
+
+  setTabLoading(true);
+  const id = setTimeout(() => {
+    setTabLoading(false);
+  }, 600); // tweak if you want
+
+  return () => clearTimeout(id);
+}, [activeTab, loading, fetchingUser]);
+
+
   // Handle phone and address update form submit
   const phoneRegex = /^[0-9()+\-\s.]{7,20}$/;
 
@@ -514,7 +539,9 @@ export default function UserPage() {
     }
   };
 
-  if (loading || fetchingUser) return <div>Loading...</div>;
+  if (loading || fetchingUser || restaurantsLoading) {
+   return <UserPageSkeleton />;
+  }
 
   if (error)
     return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
@@ -532,7 +559,16 @@ export default function UserPage() {
       />
 
       <main className="flex-1 p-6 overflow-y-auto">
-        {activeTab === "orders" && 
+  {tabLoading ? (
+    <>
+      {activeTab === "home" && <HomeTabSkeleton />}
+      {activeTab === "orders" && <OrdersTabSkeleton />}
+      {activeTab === "messages" && <MessagesTabSkeleton />}
+      {activeTab === "settings" && <SettingsTabSkeleton />}
+    </>
+  ) : (
+    <>
+      {activeTab === "orders" && (
         <OrderTab 
           userOrders={userOrders}
           handleUserReply={handleUserReply}
@@ -540,48 +576,54 @@ export default function UserPage() {
           userName={userData.name}
           handleConfirmDelivery={handleConfirmDelivery}
           Timestamp={Timestamp}
-        />}
+        />
+      )}
 
-        {activeTab === "settings" && (
-          <SettingTab
-            defaultProfileImg={defaultProfileImg}
-            editIcon={editIcon}
-            nameInput={nameInput}
-            setNameInput={setNameInput}
-            emailInput={emailInput}
-            setEmailInput={setEmailInput}
-            phoneInput={phoneInput}
-            setPhoneInput={setPhoneInput}
-            addressInput={addressInput}
-            setAddressInput={setAddressInput}
-            savingProfile={savingProfile}
-            onSubmit={handleProfileSubmit}
-            formError={formError}
-            formSuccess={formSuccess}
-            onClearMessages={clearFormMessages}
-          />
-        )}
+      {activeTab === "settings" && (
+        <SettingTab
+          defaultProfileImg={defaultProfileImg}
+          editIcon={editIcon}
+          nameInput={nameInput}
+          setNameInput={setNameInput}
+          emailInput={emailInput}
+          setEmailInput={setEmailInput}
+          phoneInput={phoneInput}
+          setPhoneInput={setPhoneInput}
+          addressInput={addressInput}
+          setAddressInput={setAddressInput}
+          savingProfile={savingProfile}
+          onSubmit={handleProfileSubmit}
+          formError={formError}
+          formSuccess={formSuccess}
+          onClearMessages={clearFormMessages}
+        />
+      )}
 
-        {activeTab === "home" && (
-          <HomeTab
-            userLatLng={userLatLng}
-            filteredRestaurants={filteredRestaurants}
-            restaurantsWithActiveOrders={restaurantsWithActiveOrders}
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            filters={filters}
-            setFilters={setFilters}
-            clearTypes={clearTypes}
-            toggleType={toggleType}
-            searchRadius={searchRadius}
-            currentDateTime={currentDateTime}
-            navigate={navigate}
-            setSearchRadius={setSearchRadius}
-          />
-        )}
+      {activeTab === "home" && (
+        <HomeTab
+          userLatLng={userLatLng}
+          filteredRestaurants={filteredRestaurants}
+          restaurantsWithActiveOrders={restaurantsWithActiveOrders}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          filters={filters}
+          setFilters={setFilters}
+          clearTypes={clearTypes}
+          toggleType={toggleType}
+          searchRadius={searchRadius}
+          currentDateTime={currentDateTime}
+          navigate={navigate}
+          setSearchRadius={setSearchRadius}
+        />
+      )}
 
-        {activeTab === "messages" && <MessageTab userMessages={userMessages} />}
-      </main>
+      {activeTab === "messages" && (
+        <MessagesTab userMessages={userMessages} />
+      )}
+    </>
+  )}
+</main>
+
     </div>
   );
 }
