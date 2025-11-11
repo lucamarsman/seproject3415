@@ -250,38 +250,38 @@ export default function CourierPage() {
 
   // 3. UNIFIED INTERVAL (5000 MS) for Location Fetching and Database Writes
   useEffect(() => {
-    const courierId = courierData?.id;
-    if (!courierId || !navigator.geolocation) return;
-    const currentOrders = orders;
-    const fetchAndWriteLocation = async () => {
-        if (locationAccessDenied) return;
+    const courierId = courierData?.id;
+    if (!courierId || !navigator.geolocation) return;
+    const currentOrders = orders;
+    const fetchAndWriteLocation = async () => {
+        if (locationAccessDenied) return;
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const { latitude, longitude } = position.coords;
-                const formattedLocation = { latitude, longitude };
-                //console.log(formattedLocation);
-                
-                // 1. LOCATION UPDATE (Always runs)
-                setCourierData((prev) => ({
-                    ...prev,
-                    location: formattedLocation,
-                }));
-                updateCourierDoc({ location: formattedLocation });
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const { latitude, longitude } = position.coords;
+                const formattedLocation = { latitude, longitude };
+                //console.log(formattedLocation);
+                
+                // 1. LOCATION UPDATE (Always runs)
+                setCourierData((prev) => ({
+                    ...prev,
+                    location: formattedLocation,
+                }));
+                updateCourierDoc({ location: formattedLocation });
 
-                if (currentTaskRef.current) {
-                    updateCourierTask(formattedLocation);
+                if (currentTaskRef.current) {
+                    updateCourierTask(formattedLocation);
 
-                    fetchCurrentTaskStatus( 
-                        currentTaskRef.current.orderId, 
-                        currentTaskRef.current.restaurantId 
-                    );
-                }
-                
-                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
-                if (!currentTaskRef.current || currentOrders.length === 0) {
-                    
-                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
+                    fetchCurrentTaskStatus( 
+                        currentTaskRef.current.orderId, 
+                        currentTaskRef.current.restaurantId 
+                    );
+                }
+                
+                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
+                if (!currentTaskRef.current || currentOrders.length === 0) {
+                    
+                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
 
                     //LOCAL DISTANCE
                     const courierCoords = { latitude, longitude };
@@ -316,54 +316,54 @@ export default function CourierPage() {
                     });
 
 
-                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
-                    const newAvailableOrderIds = new Set(ordersWithDistances.map(o => o.orderId));
-                    
-                    const hasNewOrders = ordersWithDistances.some(order => !currentOrderIds.has(order.orderId));
-                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
+                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
+                    const newAvailableOrderIds = new Set(ordersWithDistances.map(o => o.orderId));
+                    
+                    const hasNewOrders = ordersWithDistances.some(order => !currentOrderIds.has(order.orderId));
+                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
 
                     // Use ordersWithDistances instead of availableOrders for updating state
-                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
-                        setOrders(ordersWithDistances);
-                        setCurrentTask(assignedOrder);
-                        setFetchingOrders(false);
-                        console.log(`Task list updated: ${ordersWithDistances.length} tasks now available.`);
-                    }
-                
-                } else {
-                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
-                    if (!assignedOrder && currentTaskRef.current) {
-                        setCurrentTask(null);
-                        setFetchingOrders(false);
-                    }
-                }
+                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
+                        setOrders(ordersWithDistances);
+                        setCurrentTask(assignedOrder);
+                        setFetchingOrders(false);
+                        console.log(`Task list updated: ${ordersWithDistances.length} tasks now available.`);
+                    }
+                
+                } else {
+                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
+                    if (!assignedOrder && currentTaskRef.current) {
+                        setCurrentTask(null);
+                        setFetchingOrders(false);
+                    }
+                }
 
-                if (locationAccessDenied) {
-                    setLocationAccessDenied(false);
-                    setError("");
-                }
-            },
-            (err) => {
-                console.error("Location error during interval:", err.code, err.message);
+                if (locationAccessDenied) {
+                    setLocationAccessDenied(false);
+                    setError("");
+                }
+            },
+            (err) => {
+                console.error("Location error during interval:", err.code, err.message);
 
-                if (err.code === 1) {
-                    setLocationAccessDenied(true);
-                    setError(getLocationErrorMessage(err.code));
-                    if (courierDataRef.current?.status !== "inactive") {
-                        updateCourierDoc({ status: "inactive" });
-                    }
-                } 
-            },
-            { enableHighAccuracy: true, maximumAge: 0 } 
-        );
-    };
-    const interval = setInterval(fetchAndWriteLocation, 5000);
-    fetchAndWriteLocation(); 
+                if (err.code === 1) {
+                    setLocationAccessDenied(true);
+                    setError(getLocationErrorMessage(err.code));
+                    if (courierDataRef.current?.status !== "inactive") {
+                        updateCourierDoc({ status: "inactive" });
+                    }
+                } 
+            },
+            { enableHighAccuracy: true, maximumAge: 0 } 
+        );
+    };
+    const interval = setInterval(fetchAndWriteLocation, 5000);
+    fetchAndWriteLocation(); 
 
-    return () => {
-        clearInterval(interval);
-    };
-  }, [courierData?.id, locationAccessDenied, orders]);
+    return () => {
+        clearInterval(interval);
+    };
+  }, [courierData?.id, locationAccessDenied, orders]);
 
   // 4. Fetch Orders, handleAccept, handleReject
   const fetchAllOrders = async (courierId) => {
