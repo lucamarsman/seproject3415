@@ -6,6 +6,7 @@ import {
   collection,
   getDocs,
   getDoc,
+  setDoc,
   addDoc,
   GeoPoint,
   Timestamp,
@@ -15,11 +16,12 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  query,
+  where,
 } from "firebase/firestore";
 import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
 import { coordinateFormat } from "../utils/coordinateFormat.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
-import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 import { calculateEtaRestaurant } from "../utils/calculateEtaRestaurant.js";
 
 import InfoTab from "../components/RestaurantPage/infoTab";
@@ -113,6 +115,8 @@ export default function RestaurantPage() {
   }, [restaurantData, cuisineTypes]);
 
   // Fetch or create restaurant based on logged-in user
+  // POTENTIAL UPDATE: UID could be used here, but everyone would have to recreate their restaurants
+  // While the UID is the same for User, Restaurant, and Courier -> the search path is different (so it will return the correct data)
   useEffect(() => {
     if (!user) return;
 
@@ -120,15 +124,9 @@ export default function RestaurantPage() {
 
     const fetchOrCreate = async () => {
       try {
-        const snapshot = await getDocs(restaurantsRef);
-        const matchedDoc = snapshot.docs.find((docSnap) => {
-          const data = docSnap.data();
-          const emailMatch = data.email === user.email;
-          const nameMatch =
-            data.name?.toLowerCase().trim() ===
-            user.displayName?.toLowerCase().trim();
-          return emailMatch || nameMatch;
-        });
+        const qEmail = query(restaurantsRef, where("email", "==", user.email));
+        let snapshot = await getDocs(qEmail);
+        const matchedDoc = snapshot.docs[0]; //there can only be 1 restautant per email; and email is unique
 
         if (matchedDoc) {
           const data = matchedDoc.data();
@@ -140,7 +138,7 @@ export default function RestaurantPage() {
           return;
         }
 
-        // No existing, create new restaurant
+        const docRef = doc(restaurantsRef);
         const newRest = {
           address: "",
           autoSetting: "manual",
@@ -160,13 +158,13 @@ export default function RestaurantPage() {
           name: user.displayName,
           phone: "",
           rating: 0,
+          restaurantId: docRef.id,
           storeName: "",
           totalOrders: 0,
           type: "",
         };
 
-        const docRef = await addDoc(restaurantsRef, newRest);
-        await updateDoc(docRef, { restaurantId: docRef.id });
+        await setDoc(docRef, newRest);
 
         setRestaurantData({
           id: docRef.id,
@@ -250,11 +248,9 @@ export default function RestaurantPage() {
     }
   };
 
-  // Realtime listener. UPDATES: orderConfirmed, estimatedPickUpTime, estimatedPreppedTime
+  // UPDATES ALL ORDER STATUSES
   useEffect(() => {
     if (!restaurantData?.id) return;
-
-    // GET ALL ORDERS IN RESTAURANT
     const ordersCollectionRef = collection(
       db,
       "restaurants",
@@ -263,8 +259,15 @@ export default function RestaurantPage() {
     );
     let firstLoad = true;
 
-    // PROCESSING FUNCTION
-    const processOrders = async (ordersArray) => {      
+    const processOrders = async (ordersArray) => {
+      
+      // 0. ARCHIVE ALL OLD COMPLETED ORDERS
+      /*
+      if (restaurantData?.id) {
+        await archiveOldOrders(ordersArray, restaurantData.id);
+      }
+      const ordersArray = ordersRef.current;*/
+
       // 1. COURIER TRACKING AND ETA CALCULATION (activeOrders only)
       const activeOrders = ordersArray.filter(
         (order) =>
@@ -480,6 +483,7 @@ export default function RestaurantPage() {
     };
   }, [restaurantData?.id]);
 
+  // CASE: RESTAURANT ACCEPTS ORDER
   const handleConfirmOrder = async (orderId) => {
     try {
       const orderDocRef = doc(
@@ -490,57 +494,42 @@ export default function RestaurantPage() {
         orderId
       );
 
-      // 1. PASSING CONFIRMED TIME + TOTALPREPTIME = ESTIMATE READY TIME TO ORDER DOC FOR BASE TIME OF ESTIMATED DELIVERY TIME
-      const orderSnap = await getDoc(orderDocRef);
-      if (!orderSnap.exists()) {
-        console.error("Order document not found:", orderId);
-        setError("Order not found.");
-        return;
+      // GET ORDER DATA
+      let orderData = orders.find(o => o.orderId === orderId); 
+      if (!orderData) {
+        const orderSnap = await getDoc(orderDocRef);
+        if (!orderSnap.exists()) {
+          console.error("Order document not found:", orderId);
+          setError("Order not found.");
+          return;
+        }
+        orderData = orderSnap.data();
       }
-
-      const orderData = orderSnap.data();
+      
       const totalPrepTime = orderData.totalPrepTime || 0;
-      //Update restaurant earnings
+      
+      // UPDATE RESTAURANT DATA
       const restaurantRef = doc(db, "restaurants", restaurantData.id);
       const paymentRestaurant = orderData.paymentRestaurant || 0; 
       await updateDoc(restaurantRef, {
         earnings: increment(paymentRestaurant),
       });
+      
       const currentTime = new Date();
       const confirmedTime = Timestamp.fromDate(currentTime);
       const estimatedTimeDate = new Date(currentTime.getTime());
       estimatedTimeDate.setMinutes(currentTime.getMinutes() + totalPrepTime);
       const estimatedPreppedTime = Timestamp.fromDate(estimatedTimeDate);
 
-      //2. BUILD THE COURIER ARRAY (this should be updated)
-      const restLat = restaurantData.location.latitude;
-      const restLng = restaurantData.location.longitude;
-      const couriersCol = collection(db, "couriers");
-      const couriersSnap = await getDocs(couriersCol);
-      const courierArray = [];
-
-      couriersSnap.forEach((courierDoc) => {
-        const cData = courierDoc.data();
-        if (cData.location && typeof cData.location.latitude === "number") {
-          const cLat = cData.location.latitude;
-          const cLng = cData.location.longitude;
-
-          const distKm = getDistanceInKm(restLat, restLng, cLat, cLng);
-          if (distKm <= 1) { //set to 50
-            courierArray.push(courierDoc.id);
-          }
-        }
-      });
-
-      // --- 3. UPDATE ORDER IN FIRESTORE ---
+      // 3. UPDATE ORDER IN FIRESTORE (1 Write)
       await updateDoc(orderDocRef, {
         orderConfirmed: true,
         deliveryStatus: "Confirmed, order being prepared.",
-        courierArray: courierArray,
         confirmedTime: confirmedTime,
         estimatedPreppedTime: estimatedPreppedTime,
       });
 
+      //LOCAL STATE
       setOrders((prev) =>
         prev.map((o) =>
           o.orderId === orderId
@@ -548,7 +537,6 @@ export default function RestaurantPage() {
                 ...o,
                 orderConfirmed: true,
                 deliveryStatus: "Confirmed, order being prepared.",
-                courierArray: courierArray,
                 confirmedTime: confirmedTime,
                 estimatedPreppedTime: estimatedPreppedTime,
               }
@@ -738,7 +726,7 @@ export default function RestaurantPage() {
         */}
         {activeTab === "orderHistory" && (
           <OrderHistoryTab loadingOrders={loadingOrders} allOrders={orders}
-          onArchiveClick={() => archiveOldOrders(orders, restaurantData.id)}
+          archiveOldOrders={() => archiveOldOrders(orders, restaurantData.id)}
           />
         )}
 
@@ -773,9 +761,7 @@ export default function RestaurantPage() {
 
 ~All restaurantOrders: a periodically updating function that assigns orders to multiple couriers based on (currently: each restaurant is doing this client side, doesn't work if the client restaurant not online);
 - Need a rejectedArray if courier rejects
-- Need a periodic courierArray updater that checks against rejectedArray and only updates if courierId = ""
 - If no available couriers, reassign to rejectedArray with higher earning
-* courierArray created to find all nearby couriers available for order (should be admin server job for orderConfirmed=true orders and updated consistently)
 
 * Later: Delete button in settings
 * Later: Add a precise location pointer on clicking the map (reason: the geolocator is not that precise)

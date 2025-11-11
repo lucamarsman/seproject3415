@@ -13,9 +13,12 @@ import {
   writeBatch,
   Timestamp,
   increment,
+  query,
+  where,
 } from "firebase/firestore";
-import { calculateEtaCourier } from '../utils/calculateEtaCourier';
+import { getDistanceInKm } from "../utils/getDistanceInKm.js";
 import { coordinateFormat } from '../utils/coordinateFormat';
+import { calculateEtaCourier } from '../utils/calculateEtaCourier';
 
 export default function CourierPage() {
   const [user, setUser] = useState(null);
@@ -110,29 +113,22 @@ export default function CourierPage() {
     return unsubscribe;
   }, []);
 
-  // 1. Initial Fetch/Create Courier Logic
+  // LOGIN OR CREATE USER
+  // POTENTIAL UPDATE: UID could be used here, but everyone would have to recreate their couriers
   useEffect(() => {
     if (!user) return;
 
     const couriersRef = collection(db, "couriers");
-
     const fetchOrCreateCourier = async () => {
-      try {
-        const snapshot = await getDocs(couriersRef);
+        try {
+          const q = query(couriersRef, where("email", "==", user.email));
+          const snapshot = await getDocs(q);
 
-        const matchedDoc = snapshot.docs.find((doc) => {
-          const data = doc.data();
-          const emailMatch = data.email === user.email;
-          const nameMatch =
-            data.name?.toLowerCase().trim() ===
-            user.displayName?.toLowerCase().trim();
-          return emailMatch || nameMatch;
-        });
-
-        if (matchedDoc) {
-          setCourierData({ id: matchedDoc.id, ...matchedDoc.data() });
-          setFetchingCourier(false);
-          return;
+          if (!snapshot.empty) {
+              const matchedDoc = snapshot.docs[0];
+              setCourierData({ id: matchedDoc.id, ...matchedDoc.data() });
+              setFetchingCourier(false);
+              return;
         }
 
         if (!navigator.geolocation) {
@@ -171,10 +167,11 @@ export default function CourierPage() {
               setLocationAccessDenied(true);
             }
 
-            // fix this
+            // USE THIS ONLY IF MOBILE IS AVAILABLE
+            /*
             if (courierData?.id && courierData.status !== "inactive") {
               updateCourierStatus("inactive");
-            }
+            }*/
 
             setFetchingCourier(false);
           }
@@ -222,6 +219,8 @@ export default function CourierPage() {
       updates = calculateEtaCourier(formattedCourierLoc, formattedUserLoc, now);
       updates.deliveryStatus = "Delivery enroute.";
       updates.courierLocation = formattedCourierLoc;
+      updates.courier_R_Distance = 0;
+      updates.courier_R_EtaMinutes = 0;
 
       const orderDocRef = doc(
         db,
@@ -251,86 +250,120 @@ export default function CourierPage() {
 
   // 3. UNIFIED INTERVAL (5000 MS) for Location Fetching and Database Writes
   useEffect(() => {
-    const courierId = courierData?.id;
-    if (!courierId || !navigator.geolocation) return;
-    const currentOrders = orders;
-    const fetchAndWriteLocation = async () => {
-        if (locationAccessDenied) return;
+    const courierId = courierData?.id;
+    if (!courierId || !navigator.geolocation) return;
+    const currentOrders = orders;
+    const fetchAndWriteLocation = async () => {
+        if (locationAccessDenied) return;
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const { latitude, longitude } = position.coords;
-                const formattedLocation = { latitude, longitude };
-                //console.log(formattedLocation);
-                
-                // 1. LOCATION UPDATE (Always runs)
-                setCourierData((prev) => ({
-                    ...prev,
-                    location: formattedLocation,
-                }));
-                updateCourierDoc({ location: formattedLocation });
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const { latitude, longitude } = position.coords;
+                const formattedLocation = { latitude, longitude };
+                //console.log(formattedLocation);
+                
+                // 1. LOCATION UPDATE (Always runs)
+                setCourierData((prev) => ({
+                    ...prev,
+                    location: formattedLocation,
+                }));
+                updateCourierDoc({ location: formattedLocation });
 
-                // 2. CURRENT TASK STATUS/ETA UPDATE (Only if assigned)
-                if (currentTaskRef.current) {
-                    updateCourierTask(formattedLocation);
-                    fetchCurrentTaskStatus( 
-                        currentTaskRef.current.orderId, 
-                        currentTaskRef.current.restaurantId 
-                    );
-                }
-                
-                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
-                if (!currentTaskRef.current || currentOrders.length === 0) {
-                    
-                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
+                if (currentTaskRef.current) {
+                    updateCourierTask(formattedLocation);
 
-                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
-                    const newAvailableOrderIds = new Set(availableOrders.map(o => o.orderId));
-                    
-                    const hasNewOrders = availableOrders.some(order => !currentOrderIds.has(order.orderId));
-                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
+                    fetchCurrentTaskStatus( 
+                        currentTaskRef.current.orderId, 
+                        currentTaskRef.current.restaurantId 
+                    );
+                }
+                
+                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
+                if (!currentTaskRef.current || currentOrders.length === 0) {
+                    
+                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
 
-                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
-                        setOrders(availableOrders);
-                        setCurrentTask(assignedOrder);
-                        setFetchingOrders(false);
-                        console.log(`Task list updated: ${availableOrders.length} tasks now available.`);
-                    }
-                
-                } else {
-                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
-                    if (!assignedOrder && currentTaskRef.current) {
-                        setCurrentTask(null);
-                        setFetchingOrders(false);
-                    }
-                }
+                    //LOCAL DISTANCE
+                    const courierCoords = { latitude, longitude };
+                    const ordersWithDistances = availableOrders.map(order => {
+                        const restaurantCoords = coordinateFormat(order.restaurantLocation);
+                        const userCoords = coordinateFormat(order.userLocation);
 
-                if (locationAccessDenied) {
-                    setLocationAccessDenied(false);
-                    setError("");
-                }
-            },
-            (err) => {
-                console.error("Location error during interval:", err.code, err.message);
+                        let courier_R_Distance = null;
+                        let courier_U_Distance = null;
+                        let total_Distance = null;
 
-                if (err.code === 1) {
-                    setLocationAccessDenied(true);
-                    setError(getLocationErrorMessage(err.code));
-                    if (courierDataRef.current?.status !== "inactive") {
-                        updateCourierDoc({ status: "inactive" });
-                    }
-                } 
-            },
-            { enableHighAccuracy: true, maximumAge: 0 } 
-        );
-    };
-    const interval = setInterval(fetchAndWriteLocation, 5000);
-    fetchAndWriteLocation(); 
+                        if (restaurantCoords) {
+                            courier_R_Distance = Number(getDistanceInKm(
+                                courierCoords.latitude, courierCoords.longitude, 
+                                restaurantCoords.latitude, restaurantCoords.longitude
+                            ));
+                        }
+                        if (userCoords) {
+                            courier_U_Distance = Number(getDistanceInKm(
+                                courierCoords.latitude, courierCoords.longitude, 
+                                userCoords.latitude, userCoords.longitude
+                            ));
+                        }
+                        const total_Distance_Calculated = courier_R_Distance + courier_U_Distance;
+                        total_Distance = total_Distance_Calculated.toFixed(2);
+                        
+                        return {
+                            ...order,
+                            courier_R_Distance,
+                            total_Distance,
+                        };
+                    });
 
-    return () => {
-        clearInterval(interval);
-    };
-  }, [courierData?.id, locationAccessDenied, orders]);
+
+                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
+                    const newAvailableOrderIds = new Set(ordersWithDistances.map(o => o.orderId));
+                    
+                    const hasNewOrders = ordersWithDistances.some(order => !currentOrderIds.has(order.orderId));
+                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
+
+                    // Use ordersWithDistances instead of availableOrders for updating state
+                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
+                        setOrders(ordersWithDistances);
+                        setCurrentTask(assignedOrder);
+                        setFetchingOrders(false);
+                        console.log(`Task list updated: ${ordersWithDistances.length} tasks now available.`);
+                    }
+                
+                } else {
+                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
+                    if (!assignedOrder && currentTaskRef.current) {
+                        setCurrentTask(null);
+                        setFetchingOrders(false);
+                    }
+                }
+
+                if (locationAccessDenied) {
+                    setLocationAccessDenied(false);
+                    setError("");
+                }
+            },
+            (err) => {
+                console.error("Location error during interval:", err.code, err.message);
+
+                if (err.code === 1) {
+                    setLocationAccessDenied(true);
+                    setError(getLocationErrorMessage(err.code));
+                    if (courierDataRef.current?.status !== "inactive") {
+                        updateCourierDoc({ status: "inactive" });
+                    }
+                } 
+            },
+            { enableHighAccuracy: true, maximumAge: 0 } 
+        );
+    };
+    const interval = setInterval(fetchAndWriteLocation, 5000);
+    fetchAndWriteLocation(); 
+
+    return () => {
+        clearInterval(interval);
+    };
+  }, [courierData?.id, locationAccessDenied, orders]);
 
   // 4. Fetch Orders, handleAccept, handleReject
   const fetchAllOrders = async (courierId) => {
@@ -560,82 +593,119 @@ export default function CourierPage() {
 
         <h2 className="text-xl font-semibold">Current Task</h2>
         {fetchingOrders ? (
-          <p>Loading tasks…</p>
-        ) : currentTask ? (
-          <section className="mb-8">
-            <div className="p-4 border rounded bg-gray-100">
-              <p><strong>Order ID:</strong> {currentTask.orderId}</p>
-              <p><strong>Payout:</strong> ${currentTask.paymentCourier.toFixed(2)}</p>
-              <strong>Items:</strong>
-                <ul className="ml-4 list-disc">
-                  {currentTask.items?.map((item, i) => (
+    <p>Loading tasks…</p>
+) : currentTask ? (
+    <section className="mb-8">
+        <h2 className="text-xl font-semibold mb-3">📦 Current Delivery</h2>
+        <div className="p-4 border rounded shadow-md bg-white">
+            
+            {/* Table for Key Metrics (Tighter, Scanable Data) */}
+            <table className="w-full text-sm mb-3">
+                <thead className="border-b bg-gray-50">
+                    <tr>
+                      <th className="py-2 px-2 text-left">Order ID</th>
+                      <th className="py-2 px-2 text-left">Payout</th>
+                      <th className="py-2 px-2 text-left">R Distance: <span className="font-normal">{currentTask.restaurantAddress}</span></th>
+                      <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{currentTask.userAddress}</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td className="py-1 px-2 font-semibold">{currentTask.orderId}</td>
+                        <td className="py-1 px-2 font-semibold text-green-600">
+                            ${currentTask.paymentCourier.toFixed(2)}
+                        </td>
+                        <td className="py-1 px-2">{currentTask.courier_R_Distance}km</td>
+                        <td className="py-1 px-2">{currentTask.courier_U_Distance}km</td>
+                    </tr>
+                </tbody>
+            </table>
+            {/* Items List */}
+            <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
+            <ul className="ml-4 list-disc text-xs space-y-0.5">
+                {currentTask.items?.map((item, i) => (
                     <li key={i}>
-                      {item.name} × {item.quantity}
+                        {item.name} × {item.quantity}
                     </li>
-                  ))}
-                </ul>
-              <p><strong>Restaurant Address:</strong> {currentTask.restaurantAddress}</p>
-              <p><strong>User Address:</strong> {currentTask.userAddress}</p>
-              {currentTask.courierPickedUp && (
+                ))}
+            </ul>
+            
+            {/* Action Button */}
+            {currentTask.courierPickedUp && (
                 <button
-                  onClick={() => handleUserExchange(currentTask.orderId)}
-                  className="mt-3 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+                    onClick={() => handleUserExchange(currentTask.orderId)}
+                    className="mt-4 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
                 >
-                  Confirm Delivery
+                    Confirm Delivery
                 </button>
-              )}
-            </div>
-          </section>
-        ) : (
-          <p>No current tasks.</p>
-        )}
+            )}
+        </div>
+    </section>
+) : (
+    <p>No current tasks.</p> 
+)}
 
         {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
         {!currentTask && (
-          <>
-            <hr className="my-8 border-t-2 border-gray-300" />
-            <h2 className="text-xl font-semibold mb-4">📝 Task List</h2>
-            {fetchingOrders ? (
-              <p>Loading tasks…</p>
-            ) : orders.length === 0 ? (
-              <p>No tasks available.</p>
-            ) : (
-              <ul className="list-disc list-inside text-gray-600">
-                {orders.map((order, idx) => (
-                  <li key={idx} className="p-4 mb-4 border rounded bg-gray-50">
-                    <strong>Order ID:</strong> {order.orderId} <br />
-                    <p><strong>Payout:</strong> ${Number(order?.paymentCourier).toFixed(2)}</p>
-                    <strong>Items:</strong>
-                    <ul className="ml-4 list-disc">
-                      {order.items.map((item, i) => (
-                        <li key={i}>
+    <>
+      <hr className="my-8 border-t-2 border-gray-300" />
+      <h2 className="text-xl font-semibold mb-4">📝 Available Tasks</h2>
+      {fetchingOrders ? (
+        <p>Loading tasks…</p>
+      ) : orders.length === 0 ? (
+        <p>No tasks available.</p>
+      ) : (
+        <ul className="list-none space-y-4 text-gray-700"> 
+          {orders.map((order, idx) => (
+            <li key={idx} className="p-4 border rounded shadow-md bg-white">
+              
+              {/* Table for Key Metrics (Tighter, Scanable Data) */}
+              <table className="w-full text-sm mb-3">
+                <thead className="border-b bg-gray-50">
+                  <tr>
+                    <th className="py-2 px-2 text-left">Order ID</th>
+                    <th className="py-2 px-2 text-left">Payout</th>
+                    <th className="py-2 px-2 text-left">R Distance: <span className="font-normal">{order.restaurantAddress}</span></th>
+                    <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{order.userAddress}</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="py-1 px-2 font-semibold">{order.orderId}</td>
+                    <td className="py-1 px-2 font-semibold text-green-600">
+                      ${Number(order.paymentCourier).toFixed(2)}
+                    </td>
+                    <td className="py-1 px-2">{order.courier_R_Distance}km</td>
+                    <td className="py-1 px-2">{order.total_Distance}km</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Items List */}
+              <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
+              <ul className="ml-4 list-disc text-xs space-y-0.5">
+                  {order.items.map((item, i) => (
+                      <li key={i}>
                           {item.name} × {item.quantity}
-                        </li>
-                      ))}
-                    </ul>
-                    <strong>Restaurant Address:</strong> {order.restaurantAddress} <br />
-                    <strong>User Address:</strong> {order.userAddress}
-                    <div className="mt-2 space-x-2">
-                      <button
-                        className="bg-green-500 text-white px-3 py-1 rounded"
-                        onClick={() => handleAccept(order)}
-                      >
-                        Accept Task
-                      </button>
-                      {/*
-                      <button
-                        className="bg-red-500 text-white px-3 py-1 rounded"
-                        onClick={() => handleReject(order)}
-                      >
-                        Reject
-                      </button>*/}
-                    </div>
-                  </li>
-                ))}
+                      </li>
+                  ))}
               </ul>
-            )}
-          </>
-        )}
+              
+              {/* Action Button */}
+              <div className="mt-4">
+                  <button
+                      className="bg-green-600 text-white px-4 py-2 rounded-md shadow hover:bg-green-700 transition"
+                      onClick={() => handleAccept(order)}
+                  >
+                      Accept Task
+                  </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+)}
       </>
     ) : null}
   </div>
@@ -644,14 +714,6 @@ export default function CourierPage() {
 
 /*
 TODO
-*** For an order to appear
-      -> orderData.orderConfirmed === true && orderData.courierId === "" && courierId in courierArray [DONE]
-      -> only show payment/courier on the task (incentive to accept); likewise for restaurantPage; likewise for admin record
-
-*** 5. Courier presses "Picked up" button when within a close gps radius -> deliveryStatus: "order being delivered" (if restaurant doesn't)
-*** 6. Courier presses "Delivered" button when within a close gps radius -> deliveryStatus: "completed"
-*** 7. Order copied to collection: systemFiles/completedOrders -> order deleted from systemFiles/restaurantOrders 
-*** 8. couriers/{courierId} field earnings increase = to order "restaurants/{restaurantId}/restaurantOrders/{orderId} field payment/courier" field     
 
 * Later: show 1 task at a time to each courier via server scheduling
 * Later: add phone number
@@ -663,35 +725,6 @@ TODO
 * Later: courier must be within a certain distance to accept a task
 * Advanced: couriers with multiple tasks are possible [2 people in same area, around same time, order from the same McDonalds]; task gen function in systemFiles restaurant orders
 
-
-courierId: used by admin to identify the courier on a job task                                                    (essential for job)
-currentTask: used by admin to identify if the courier has a task <orderId>                                          [filled / empty]
-earnings: 
-email: necessary for admin to contact you
-inactivityTimer: increases if no significant difference between location coordinates over a period of time, 
-                 reset to 0 if courier presses waiting for restaurant, waiting for customer, or movement
-location: necessary for inactivity timer calculation
-movementFlag: active (moving), inactive (10 min), waiting for restaurant, waiting for customer, need assistance     [active / T]
-name: necessary for admin to contact you
-phoneNum: necessary for admin to contact you
-status: used by admin to identify if the courier has a gps connection                                               [active / T]
-
-
-# Order sequence:
-1. User makes order (OrderPage); orderConfirmed: null; Status: awaiting restaurant confirmation
-2. Restaurant confirms, rejects, or a timeout occurs (RestaurantPage)
-   If accepted -> orderConfirmed = True -> deliveryStatus: "order confirmed, being prepared"
-      rejected -> orderConfirmed = False -> deliveryStatus: "order rejected" (this could then go to another restaurant...)
-      timeout -> orderConfirmed = False -> deliveryStatus: "order rejected" (this could then go to another restaurant...)
-3. Task shows on CourierPage (if orderConfirmed = True)
-   If accept -> courierId value added to order courierId field (to hypothetically match @ restaurant/courier meeting point)
-                deliveryStatus = "delivery in progress"
-                car icon @ gps of courier shows on UserPage
-   If reject -> a new task is offered under Task List (to limit preferential choices)
-4. On arrival to the user; courier selects button "delivered" -> deliveryStatus = "completed"
-   order copied to collection: systemFiles/completedOrders -> order deleted from systemFiles/restaurantOrders
-
-
 Cases: 
 1. status = inactive &                                  currentTask = empty  -> currentTasks are unavailable to be added
 2. status = inactive &                                  currentTask = filled -> admin will contact (by email and phone number)
@@ -701,7 +734,6 @@ Cases:
 * admin (bot) will reassign the task to restaurant orders, if the current courier (2) has it, and does not respond after msg 
 * admin (bot) will reassign the task to restaurant orders, if the current courier (3) has it, and does not respond after msg 
 * admin (bot) will create a special assistance task to restaurant orders, if the courier (4) asks for assistance
-
 
 # Assumes GPS is always dynamic, gps and movement is always tracked
 */

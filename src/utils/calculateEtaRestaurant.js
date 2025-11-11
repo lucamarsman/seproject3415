@@ -25,7 +25,6 @@ export function calculateEtaRestaurant(locations, now, preppedDate) {
     
     // --- ESTIMATED PICKUP TIME (TIMESTAMP) ---
     const courierArrivalDate = new Date(now.getTime() + courier_R_EtaMinutes * 60000);
-    // Pick-up happens after courier arrives AND food is ready
     const earliestPickupTime = Math.max(courierArrivalDate.getTime(), preppedDate.getTime());
     const estimatedPickUpDate = new Date(earliestPickupTime);
     

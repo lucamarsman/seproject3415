@@ -17,7 +17,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
 
   const [newModName, setNewModName] = useState("");
   const [newModPrice, setNewModPrice] = useState("");
-  const [editingMod, setEditingMod] = useState({}); // { itemIndex: { name: '', price: '' } }
+  const [editingMod, setEditingMod] = useState({});
 
   // --- Handlers for New Item Modifications ---
   const handleAddModification = () => {
@@ -101,10 +101,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
 
   const handleSaveEditingMod = (itemIndex) => {
     const modData = editingMod[itemIndex] || { name: '', price: '' };
-    
     handleAddExistingModification(itemIndex, modData.name, modData.price); 
-
-    // Clear the inputs after successful add
     setEditingMod(prev => ({ ...prev, [itemIndex]: { name: '', price: '' } }));
   };
 
@@ -125,7 +122,7 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
       calories: newMenuItem.calories ? parseInt(newMenuItem.calories) : null,
       price: parseFloat(newMenuItem.price),
       prepTime: newMenuItem.prepTime ? parseInt(newMenuItem.prepTime) : null,
-      modifications: newMenuItem.modifications || [], // 🟢 Include modifications
+      modifications: newMenuItem.modifications || [],
     };
 
     const updatedMenu = [...(restaurantData.menu || []), item];
@@ -133,12 +130,10 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     const docRef = doc(db, "restaurants", restaurantData.id);
     try {
       await updateDoc(docRef, { menu: updatedMenu });
-      // Update local state with the new, correctly formatted menu
       setRestaurantData((prev) => ({
         ...prev,
         menu: updatedMenu,
       }));
-      // Reset form
       setNewMenuItem({
         name: "",
         description: "",
@@ -167,7 +162,6 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
       if (["price", "calories", "prepTime"].includes(field)) {
         newValue = value === "" ? "" : parseFloat(value);
       }
-      // Ensure modifications field is retained when updating other fields
       newMenu[index] = { ...newMenu[index], [field]: newValue };
       return { ...prev, menu: newMenu };
     });
@@ -180,7 +174,6 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     // Convert string values back to numbers for Firestore/state consistency before saving
     const formattedItem = {
       ...itemToUpdate,
-      // Ensure modifications is not lost if it was empty/undefined
       modifications: itemToUpdate.modifications || [],
       calories: itemToUpdate.calories ? parseInt(itemToUpdate.calories) : null,
       price: parseFloat(itemToUpdate.price),
@@ -196,7 +189,6 @@ const MenuTab = ({ restaurantData, setRestaurantData, db, doc, updateDoc }) => {
     updateDoc(docRef, { menu: updatedMenu })
       .then(() => {
         alert("Menu item updated successfully!");
-        // Update the state with the correctly formatted numbers
         setRestaurantData((prev) => ({
           ...prev,
           menu: updatedMenu,

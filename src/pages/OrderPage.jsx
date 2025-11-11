@@ -229,7 +229,7 @@ export default function OrderPage() {
       );
     
       const createdAt = Timestamp.now();
-      const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 30000);
+      const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 60000);
 
       // Step 4: Construct the order document 
       const newOrder = {

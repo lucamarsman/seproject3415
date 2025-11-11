@@ -1,26 +1,26 @@
-import React from "react";
+import React, { useEffect } from 'react';
 
 const formatOrderTimestamp = (timestamp) => {
   return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
 };
 
-export default function OrderHistoryTab({ loadingOrders, allOrders = [], onArchiveClick }) {
+export default function OrderHistoryTab({ loadingOrders, allOrders = [], archiveOldOrders }) {
   const rejectedOrders = allOrders.filter((order) => order.orderConfirmed === false);
   const R_completedOrders = allOrders.filter((order) => order.courierPickedUp === true);
+  const totalOrders = rejectedOrders.length + R_completedOrders.length;
+
+  useEffect(() => {
+    if (totalOrders > 5) {
+      archiveOldOrders();
+    }
+  }, [totalOrders, archiveOldOrders]);
 
   return (
     <>
       <h2 className="text-2xl font-semibold mb-4">
-        Order History ({rejectedOrders.length + R_completedOrders.length} Total)
+        Order History ({totalOrders} Total)
       </h2>
-      <button
-            type="button"
-            onClick={onArchiveClick}
-            className="mt-3 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
-        >
-            Archive Orders
-        </button>
-
+      <p>Note: Orders are archived if the total is greater than 5, meet the completion criteria, and time length criteria.</p>
       {/* --- REJECTED/TIMED-OUT ORDERS --- */}
       <div className="mt-6">
         <h3 className="text-xl font-semibold mb-4 border-b pb-2 text-black-800">

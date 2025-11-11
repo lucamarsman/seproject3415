@@ -89,7 +89,7 @@ export default function UserPage() {
     return () => unsub();
   }, []);
 
-  // Fetch or create user document
+  // CREATE NEW USER OR LOGIN (uid is derived from Google ID, so changing any user variable does not affect login)
   useEffect(() => {
     if (!user) return;
 
