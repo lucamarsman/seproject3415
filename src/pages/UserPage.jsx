@@ -565,7 +565,7 @@ export default function UserPage() {
       />
 
       <main className="flex-1 p-6 overflow-y-auto">
-      {tabLoading ? (
+  {tabLoading ? (
     <>
       {activeTab === "home" && <HomeTabSkeleton />}
       {activeTab === "orders" && <OrdersTabSkeleton />}

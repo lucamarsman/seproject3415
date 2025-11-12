@@ -549,7 +549,6 @@ export default function HomeTab({
               }}
               className="flex flex-col h-full text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
             >
-
               <div className="relative w-full aspect-[5/1] bg-gray-100 overflow-hidden">
                 {getBannerUrl(r) ? (
                   <img
