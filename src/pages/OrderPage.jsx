@@ -289,7 +289,7 @@ export default function OrderPage() {
     }
   };
 
-  // LOADING SCREEN CHECKS (JSX remains the same)
+  // LOADING SCREEN CHECKS
   if (!authChecked) {
       return <div className="p-6 text-center text-xl">Checking authentication...</div>;
   }

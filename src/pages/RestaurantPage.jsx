@@ -64,6 +64,7 @@ export default function RestaurantPage() {
   const [selectedType, setSelectedType] = useState("");
   const [settings, setSettings] = useState({
     autoSetting: "manual",
+    serviceRange: 50,
   });
 
   // Auth listener
@@ -133,6 +134,7 @@ export default function RestaurantPage() {
           setRestaurantData({ id: matchedDoc.id, ...data });
           setSettings({
             autoSetting: data.autoSetting ?? "manual",
+            serviceRange: data.serviceRange ?? 50,
           });
           setFetchingRestaurant(false);
           return;
@@ -159,6 +161,7 @@ export default function RestaurantPage() {
           phone: "",
           rating: 0,
           restaurantId: docRef.id,
+          serviceRange: 50,
           storeName: "",
           totalOrders: 0,
           type: "",
@@ -736,19 +739,20 @@ export default function RestaurantPage() {
           <SettingsTab
             settings={settings}
             onUpdateSettings={async (newSettings) => {
-              setSettings(newSettings);
+              const updatedSettings = { ...settings, ...newSettings };
+              setSettings(updatedSettings);
 
               try {
-                const docRef = doc(db, "restaurants", restaurantData.id);
-                await updateDoc(docRef, {
-                  autoSetting: newSettings.autoSetting,
-                });
-
-                console.log("Settings saved to Firestore:", newSettings);
+                  const docRef = doc(db, "restaurants", restaurantData.id);
+                  await updateDoc(docRef, {
+                      autoSetting: updatedSettings.autoSetting,
+                      serviceRange: updatedSettings.serviceRange,
+                  });
+                  console.log("Settings saved to Firestore:", updatedSettings);
               } catch (err) {
-                console.error("Failed to save settings:", err);
+                  console.error("Failed to save settings:", err);
               }
-            }}
+          }}
           />
         )}
       </div>

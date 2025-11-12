@@ -174,7 +174,7 @@ export default function UserPage() {
     })();
   }, [user]);
 
-  // Inside useEffect or after fetching restaurants:
+  // FILTERING RESTAURANTS
   useEffect(() => {
     let filtered = allRestaurants
       .map((r) => {
@@ -189,7 +189,12 @@ export default function UserPage() {
         );
         return { ...r, distance: distance};
       })
-      .filter((r) => r && r.distance <= searchRadius);
+      .filter((r) => r);
+      //RESTAURANT SERVICE RANGE FILTER
+    filtered = filtered.filter((r) => {
+        const maxDeliveryRange = r.serviceRange ?? 1000; 
+        return r.distance <= searchRadius && r.distance <= maxDeliveryRange;
+    });
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();

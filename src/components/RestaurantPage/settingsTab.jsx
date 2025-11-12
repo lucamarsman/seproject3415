@@ -2,15 +2,30 @@ import { useState, useEffect } from "react";
 
 export default function SettingsTab({ settings, onUpdateSettings }) {
   const [autoMode, setAutoMode] = useState(settings?.autoSetting ?? "manual");
+  const [serviceRangeInput, setServiceRangeInput] = useState(
+    settings?.serviceRange ?? 50
+  );
 
-  // Sync local state if settings change externally
   useEffect(() => {
     setAutoMode(settings?.autoSetting ?? "manual");
-  }, [settings?.autoSetting]);
+    setServiceRangeInput(settings?.serviceRange ?? 50);
+  }, [settings?.autoSetting, settings?.serviceRange]);
 
-  const handleChange = (newMode) => {
+  // AUTOSETTING TOGGLE
+  const handleAutoChange = (newMode) => {
     setAutoMode(newMode);
     onUpdateSettings?.({ autoSetting: newMode });
+  };
+
+  // SERVICE RANGE ENTRY
+  const handleServiceRangeSubmit = (e) => {
+    e.preventDefault();
+    const rangeValue = parseInt(serviceRangeInput, 10);
+    if (isNaN(rangeValue) || rangeValue <= 0) {
+      alert("Please enter a valid range (a number greater than 0).");
+      return;
+    }
+    onUpdateSettings?.({ serviceRange: rangeValue });
   };
 
   return (
@@ -19,7 +34,8 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
         System Settings
       </h2>
 
-      <div className="border rounded-lg p-6 bg-white shadow-sm">
+      {/* Automatic Order Handling Section */}
+      <div className="border rounded-lg p-6 bg-white shadow-sm mb-8">
         <h3 className="font-medium text-lg mb-2">Automatic Order Handling</h3>
         <p className="text-gray-600 text-sm mb-4">
           Choose how new orders are handled.
@@ -40,7 +56,7 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
             className={`relative z-10 w-1/3 text-center font-medium ${
               autoMode === "reject" ? "text-white" : "text-gray-700"
             }`}
-            onClick={() => handleChange("reject")}
+            onClick={() => handleAutoChange("reject")}
           >
             Reject
           </button>
@@ -48,7 +64,7 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
             className={`relative z-10 w-1/3 text-center font-medium ${
               autoMode === "manual" ? "text-white" : "text-gray-700"
             }`}
-            onClick={() => handleChange("manual")}
+            onClick={() => handleAutoChange("manual")}
           >
             Manual
           </button>
@@ -56,11 +72,41 @@ export default function SettingsTab({ settings, onUpdateSettings }) {
             className={`relative z-10 w-1/3 text-center font-medium ${
               autoMode === "accept" ? "text-white" : "text-gray-700"
             }`}
-            onClick={() => handleChange("accept")}
+            onClick={() => handleAutoChange("accept")}
           >
             Accept
           </button>
         </div>
+      </div>
+
+      {/* Service Range Section */}
+      <div className="border rounded-lg p-6 bg-white shadow-sm">
+        <h3 className="font-medium text-lg mb-2">Service Range</h3>
+        <p className="text-gray-600 text-sm mb-4">
+          Set the maximum distance in kilometres your restaurant will serve customers.
+        </p>
+
+        <form onSubmit={handleServiceRangeSubmit} className="flex gap-4 items-end">
+          <div className="flex flex-col">
+            <label htmlFor="serviceRange" className="text-sm font-medium mb-1">
+              New Range
+            </label>
+            <input
+              id="serviceRange"
+              type="number"
+              min="1"
+              value={serviceRangeInput}
+              onChange={(e) => setServiceRangeInput(e.target.value)}
+              className="border rounded-md p-2 w-32 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition duration-150"
+          >
+            Update Range
+          </button>
+        </form>
       </div>
     </div>
   );
