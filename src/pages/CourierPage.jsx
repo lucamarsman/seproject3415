@@ -16,7 +16,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { getDistanceInKm } from "../utils/getDistanceInKm.js";
+import { calcLocalCourierDist } from "../utils/calcLocalCourierDist.js";
 import { coordinateFormat } from '../utils/coordinateFormat';
 import { calculateEtaCourier } from '../utils/calculateEtaCourier';
 
@@ -260,8 +260,8 @@ export default function CourierPage() {
             async (position) => {
                 const { latitude, longitude } = position.coords;
                 const formattedLocation = { latitude, longitude };
-                //console.log(formattedLocation);
-                
+                const courierCoords = { latitude, longitude }; // Define once here
+
                 // 1. LOCATION UPDATE (Always runs)
                 setCourierData((prev) => ({
                     ...prev,
@@ -283,46 +283,22 @@ export default function CourierPage() {
                     
                     const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
 
-                    //LOCAL DISTANCE
-                    const courierCoords = { latitude, longitude };
+                    // --- REDUNDANCY REMOVED: USE calcLocalCourierDist ---
                     const ordersWithDistances = availableOrders.map(order => {
-                        const restaurantCoords = coordinateFormat(order.restaurantLocation);
-                        const userCoords = coordinateFormat(order.userLocation);
-
-                        let courier_R_Distance = null;
-                        let courier_U_Distance = null;
-                        let total_Distance = null;
-
-                        if (restaurantCoords) {
-                            courier_R_Distance = Number(getDistanceInKm(
-                                courierCoords.latitude, courierCoords.longitude, 
-                                restaurantCoords.latitude, restaurantCoords.longitude
-                            ));
-                        }
-                        if (userCoords) {
-                            courier_U_Distance = Number(getDistanceInKm(
-                                courierCoords.latitude, courierCoords.longitude, 
-                                userCoords.latitude, userCoords.longitude
-                            ));
-                        }
-                        const total_Distance_Calculated = courier_R_Distance + courier_U_Distance;
-                        total_Distance = total_Distance_Calculated.toFixed(2);
-                        
+                        const distances = calcLocalCourierDist(order, courierCoords);
                         return {
                             ...order,
-                            courier_R_Distance,
-                            total_Distance,
+                            ...distances,
                         };
                     });
 
-
+                    // ... (rest of the if block remains the same) ...
                     const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
                     const newAvailableOrderIds = new Set(ordersWithDistances.map(o => o.orderId));
                     
                     const hasNewOrders = ordersWithDistances.some(order => !currentOrderIds.has(order.orderId));
                     const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
 
-                    // Use ordersWithDistances instead of availableOrders for updating state
                     if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
                         setOrders(ordersWithDistances);
                         setCurrentTask(assignedOrder);
@@ -588,68 +564,71 @@ export default function CourierPage() {
             </tr>
           </tbody>
         </table>
+    <hr className="my-8 border-t-2 border-gray-300" />
 
-        <hr className="my-8 border-t-2 border-gray-300" />
-
-        <h2 className="text-xl font-semibold">Current Task</h2>
-        {fetchingOrders ? (
+    <h2 className="text-xl font-semibold">Current Task</h2>
+    {fetchingOrders ? (
     <p>Loading tasks…</p>
-) : currentTask ? (
-    <section className="mb-8">
-        <h2 className="text-xl font-semibold mb-3">📦 Current Delivery</h2>
-        <div className="p-4 border rounded shadow-md bg-white">
-            
-            {/* Table for Key Metrics (Tighter, Scanable Data) */}
-            <table className="w-full text-sm mb-3">
-                <thead className="border-b bg-gray-50">
-                    <tr>
-                      <th className="py-2 px-2 text-left">Order ID</th>
-                      <th className="py-2 px-2 text-left">Payout</th>
-                      <th className="py-2 px-2 text-left">R Distance: <span className="font-normal">{currentTask.restaurantAddress}</span></th>
-                      <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{currentTask.userAddress}</span></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td className="py-1 px-2 font-semibold">{currentTask.orderId}</td>
-                        <td className="py-1 px-2 font-semibold text-green-600">
-                            ${currentTask.paymentCourier.toFixed(2)}
-                        </td>
-                        <td className="py-1 px-2">{currentTask.courier_R_Distance}km</td>
-                        <td className="py-1 px-2">{currentTask.courier_U_Distance}km</td>
-                    </tr>
-                </tbody>
-            </table>
-            {/* Items List */}
-            <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
-            <ul className="ml-4 list-disc text-xs space-y-0.5">
-                {currentTask.items?.map((item, i) => (
-                    <li key={i}>
-                        {item.name} × {item.quantity}
-                    </li>
-                ))}
-            </ul>
-            
-            {/* Action Button */}
-            {currentTask.courierPickedUp && (
-                <button
-                    onClick={() => handleUserExchange(currentTask.orderId)}
-                    className="mt-4 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
-                >
-                    Confirm Delivery
-                </button>
-            )}
-        </div>
-    </section>
-) : (
-    <p>No current tasks.</p> 
-)}
+      ) : currentTask ? (
+          <section className="mb-8">
+              <h2 className="text-xl font-semibold mb-3">Current Delivery</h2>
+              <div className="p-4 border rounded shadow-md bg-white">
+                  
+                  {/* Table for Key Metrics */}
+                  <table className="w-full text-sm mb-3">
+                      <thead className="border-b bg-gray-50">
+                          <tr>
+                            <th className="py-2 px-2 text-left">Order ID</th>
+                            <th className="py-2 px-2 text-left">Payout</th>
+                            <th className="py-2 px-2 text-left">Restaurant Distance: <span className="font-normal">{currentTask.restaurantAddress}</span></th>
+                            <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{currentTask.userAddress}</span></th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          <tr>
+                              <td className="py-1 px-2 font-semibold">{currentTask.orderId}</td>
+                              <td className="py-1 px-2 font-semibold text-green-600">
+                                  ${currentTask.paymentCourier.toFixed(2)}
+                              </td>
+                              <td className="py-1 px-2">{currentTask.courier_R_Distance}km</td>
+                              <td className="py-1 px-2">{currentTask.courierPickedUp
+                                ? currentTask.courier_U_Distance
+                                : currentTask.total_Distance}km</td>
+                          </tr>
+                      </tbody>
+                  </table>
+                  {/* Items List */}
+                  <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
+                  <ul className="ml-4 list-disc text-xs space-y-0.5">
+                      {currentTask.items?.map((item, i) => (
+                          <li key={i}>
+                              {item.name} × {item.quantity}
+                          </li>
+                      ))}
+                  </ul>
+                  
+                  {/* Action Button */}
+                  {currentTask.courierPickedUp && (
+                      <button
+                          onClick={() => handleUserExchange(currentTask.orderId)}
+                          className="mt-4 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+                      >
+                          Confirm Delivery
+                      </button>
+                  )}
+              </div>
+          </section>
+      ) : (
+          <p>No current tasks.</p> 
+      )}
 
-        {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
-        {!currentTask && (
+    {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
+    {/* set restaurantRange to the order.restaurantRange (less reads probably) */}
+    {/* make a condition to only display order.courier_R_Distance < order.restaurantRange */}
+    {!currentTask && (
     <>
       <hr className="my-8 border-t-2 border-gray-300" />
-      <h2 className="text-xl font-semibold mb-4">📝 Available Tasks</h2>
+      <h2 className="text-xl font-semibold mb-4">Available Tasks</h2>
       {fetchingOrders ? (
         <p>Loading tasks…</p>
       ) : orders.length === 0 ? (
@@ -665,7 +644,7 @@ export default function CourierPage() {
                   <tr>
                     <th className="py-2 px-2 text-left">Order ID</th>
                     <th className="py-2 px-2 text-left">Payout</th>
-                    <th className="py-2 px-2 text-left">R Distance: <span className="font-normal">{order.restaurantAddress}</span></th>
+                    <th className="py-2 px-2 text-left">Restaurant Distance: <span className="font-normal">{order.restaurantAddress}</span></th>
                     <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{order.userAddress}</span></th>
                   </tr>
                 </thead>
@@ -714,15 +693,13 @@ export default function CourierPage() {
 
 /*
 TODO
-
-* Later: show 1 task at a time to each courier via server scheduling
-* Later: add phone number
+* Later: courier must be within a certain distance to accept a task
 * Later: Better UI -> top right nav is CourierPage user profile link (Name, email, phone* Please complete your user profile before continuing)
                       Job disclosure form: standard procedures/rules - gps tracking; click deliveryStatus buttons; 
                       obligation to select movementFlag updates if waiting; add phoneNumber field
 * Later: inactivityTimer: initially set to 0; increases if gps value does not change by a significant amount
 * Later: movementFlag: initially set to inactive; set to inactive if inactivityTimer > threshold (10min)
-* Later: courier must be within a certain distance to accept a task
+
 * Advanced: couriers with multiple tasks are possible [2 people in same area, around same time, order from the same McDonalds]; task gen function in systemFiles restaurant orders
 
 Cases: 

@@ -368,6 +368,7 @@ export default function RestaurantPage() {
             estimatedPickUpTime: updates.estimatedPickUpTimeTimestamp || null,
             courier_U_Distance: updates.R_U_distanceKm || NaN,
             courier_U_EtaMinutes: updates.courier_U_EtaMinutes || NaN,
+            total_Distance: updates.total_Distance || NaN,
             estimatedDeliveryTime:
               updates.estimatedDeliveryTimeTimestamp || null,
             courierLocation: courierLocation,

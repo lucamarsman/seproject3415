@@ -548,11 +548,31 @@ footer{
 .faq summary{ cursor:pointer; font-weight: 700; }
 .faq p{ margin: 8px 0 0; color: var(--text); }
 
-/* User Page: small polish & skeletons */
-.skeleton-row{ height:14px; background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%); background-size: 200% 100%; animation: skel 1.2s ease-in-out infinite; border-radius:8px; margin:8px 0; }
-.skeleton-row.short{ width:60%; }
-@keyframes skel{ 0%{ background-position: 200% 0; } 100%{ background-position: -200% 0; } }
 
-.userpage .card .muted.small{ margin-top: 8px; display:block; }
-.order-meta div{ display:flex; gap:6px; }
-.restaurant-card-item .name{ display:inline-block; max-width: 60ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: #e5e7eb; 
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.6),
+    transparent
+  );
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

@@ -5,6 +5,7 @@ const COURIER_SPEED_KMH = 60;
 
 export function calculateEtaRestaurant(locations, now, preppedDate) {
     const { courierLoc, restaurantLoc, userLoc } = locations;
+    let total_Distance = null;
     
     // --- DISTANCE CALCULATION ---
     const C_R_distanceKm = getDistanceInKm(
@@ -15,6 +16,13 @@ export function calculateEtaRestaurant(locations, now, preppedDate) {
         restaurantLoc.latitude, restaurantLoc.longitude, 
         userLoc.latitude, userLoc.longitude
     );
+
+    if (C_R_distanceKm !== null && R_U_distanceKm !== null) {
+        const total_Distance_Calculated = C_R_distanceKm + R_U_distanceKm;
+        total_Distance = total_Distance_Calculated.toFixed(2);
+    } else {
+        total_Distance = null;
+    }
 
     // --- ETA DURATION CALCULATION ---
     const R_travelTimeMinutes = (C_R_distanceKm / COURIER_SPEED_KMH) * 60;
@@ -43,6 +51,7 @@ export function calculateEtaRestaurant(locations, now, preppedDate) {
         courier_R_EtaMinutes,
         R_U_courierTime,
         courier_U_EtaMinutes,
+        total_Distance,
         estimatedPickUpTimeTimestamp,
         estimatedDeliveryTimeTimestamp,
     };

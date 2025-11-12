@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 export default function SettingsTab({
   defaultProfileImg,
   editIcon,
@@ -14,24 +16,70 @@ export default function SettingsTab({
   formError,
   formSuccess,
   onClearMessages,
+  profileImgInput,
+  setProfileImgInput
 }) {
+  const [showAvatarPopup, setShowAvatarPopup] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState("");
+
   return (
     <>
       <div className="flex flex-col items-center mt-8 relative">
         <div className="relative w-32 h-32">
           <img
-            src={defaultProfileImg}
+            src={profileImgInput || defaultProfileImg}
             alt="Profile"
             className="w-32 h-32 object-cover rounded-full border-4 border-white shadow-md"
           />
           <button
             type="button"
             className="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-md transition-all cursor-pointer"
+            onClick={() => {
+              onClearMessages?.();
+              setAvatarUrl(profileImgInput || "");
+              setShowAvatarPopup(true);
+            }}
           >
             <img src={editIcon} alt="Edit" className="w-4 h-4" />
           </button>
         </div>
       </div>
+
+      {showAvatarPopup && (
+          <div className="mt-4 flex justify-center">
+            <div className="w-full max-w-md bg-white border border-gray-200 rounded-lg shadow-lg p-4 space-y-3 relative">
+              <input
+                type="url"
+                value={avatarUrl}
+                onChange={(e) => setAvatarUrl(e.target.value)}
+                placeholder="https://example.com/my-avatar.png"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setShowAvatarPopup(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-1.5 text-xs rounded bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  disabled={!avatarUrl.trim()}
+                  onClick={() => {
+                    setProfileImgInput(avatarUrl.trim()); 
+                    setShowAvatarPopup(false);
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
       <hr className="my-8 border-t-2 border-gray-300" />
 

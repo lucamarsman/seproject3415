@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import {
   MapContainer,
@@ -12,6 +12,7 @@ import L from "leaflet";
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
+import RestaurantCardSkeleton from "../RestaurantCardSkeleton.jsx";
 
 const stringToColor = (str) => {
   let hash = 0;
@@ -128,7 +129,7 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
         
         const polylinePositions = order.courierPickedUp
             ? [courierCoords, userCoords]
-            : [restaurantCoords, courierCoords, userCoords];
+            : [courierCoords, restaurantCoords, userCoords];
             
         return (
           <React.Fragment key={order.orderId}>
@@ -264,6 +265,19 @@ export default function HomeTab({
   setMapInstance,
   setSearchRadius,
 }) {
+  const BATCH_SIZE = 10;
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+  const loadMoreRef = useRef(null);
+
+  useEffect(() => {
+    setVisibleCount(BATCH_SIZE);
+  }, [filteredRestaurants, searchTerm, filters]);
+
+  const visibleRestaurants = useMemo(() => 
+   filteredRestaurants.slice(0, visibleCount),
+   [filteredRestaurants, visibleCount]
+  );
+
   const shouldFitBounds = filteredRestaurants.length > 0;
   const resultLabel = `${filteredRestaurants.length} ${
     filteredRestaurants.length === 1 ? "result" : "results"
@@ -278,6 +292,47 @@ export default function HomeTab({
     ],
     [userLatLng, filteredRestaurants]
   );
+
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Infinite scroll observer
+  useEffect(() => {
+  if (!loadMoreRef.current) return;
+  if (filteredRestaurants.length <= visibleCount) return; // nothing more to load
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0];
+
+      // only trigger when fully in view and not already loading
+      if (entry.isIntersecting && !isLoadingMore) {
+        setIsLoadingMore(true);
+
+        // artifical delay for ux example
+        setTimeout(() => {
+          setVisibleCount((prev) =>
+            Math.min(prev + BATCH_SIZE, filteredRestaurants.length)
+          );
+          setIsLoadingMore(false);
+        }, 600); // tweak delay if you want
+      }
+    },
+    {
+      root: null,
+      rootMargin: "0px", 
+      threshold: 1.0,   
+    }
+  );
+
+  const el = loadMoreRef.current;
+  observer.observe(el);
+
+  return () => {
+    observer.unobserve(el);
+  };
+}, [filteredRestaurants.length, visibleCount, isLoadingMore]);
+
+
 
   function getBannerUrl(r) {
     if (!r.bannerUrl) return null;
@@ -476,13 +531,13 @@ export default function HomeTab({
         Nearby Restaurants within {searchRadius} km
       </h2>
 
-      {filteredRestaurants.length === 0 ? (
+      {visibleRestaurants.length === 0 ? (
         <p className="mt-4 text-sm text-gray-600 italic">
           No restaurants match your filters.
         </p>
       ) : (
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
-          {filteredRestaurants.map((r) => (
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch auto-rows-fr">
+          {visibleRestaurants.map((r) => (
             <button
               key={r.id}
               onClick={() => {
@@ -492,9 +547,10 @@ export default function HomeTab({
                   state: { restaurant: r },
                 });
               }}
-              className="text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
+              className="flex flex-col h-full text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
             >
-              <div className="relative w-full aspect-[5/1] bg-gray-100">
+
+              <div className="relative w-full aspect-[5/1] bg-gray-100 overflow-hidden">
                 {getBannerUrl(r) ? (
                   <img
                     src={getBannerUrl(r)}
@@ -515,64 +571,79 @@ export default function HomeTab({
                 )}
               </div>
 
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <h4 className="font-semibold">
-                    {r.storeName}
-                    <span className="ml-2 text-sm text-gray-600">
-                      {typeof r.distance === "number"
-                        ? `— ${r.distance.toFixed(2)} km`
-                        : "— Location missing"}
-                    </span>
-                  </h4>
-                  <span className="shrink-0 text-sm font-medium">
-                    {r.rating ?? "N/A"}★
-                  </span>
-                </div>
-
-                <p className="mt-1 text-sm text-gray-700">{r.address}</p>
-
-                {r.hours && (
-                  <p className="mt-2 font-medium">
-                    <span
-                      className={`text-sm ${
-                        isRestaurantOpenToday(r.hours, currentDateTime)
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {isRestaurantOpenToday(r.hours, currentDateTime)
-                        ? "Open"
-                        : "Closed"}
-                    </span>
-                    <span className="ml-2 text-sm text-gray-500">
-                      {(() => {
-                        const dayName = new Date().toLocaleDateString("en-US", {
-                          weekday: "long",
-                        });
-                        const todayHours = r.hours.find(
-                          (entry) => entry[dayName]
-                        );
-                        if (!todayHours) return "(No hours set)";
-                        const opening = todayHours[dayName].Opening;
-                        const closing = todayHours[dayName].Closing;
-                        return `(${opening.slice(0, 2)}:${opening.slice(
-                          2
-                        )} - ${closing.slice(0, 2)}:${closing.slice(2)})`;
-                      })()}
-                    </span>
-                    {!isRestaurantAcceptingOrders(r.autoSetting) && (
-                      <span className="ml-2 text-red-600 text-sm font-medium">
-                        — Currently not accepting orders
+              <div className="flex-1 p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <h4 className="font-semibold leading-snug">
+                      {r.storeName}
+                      <span className="ml-2 text-sm text-gray-600">
+                        {typeof r.distance === "number"
+                          ? `— ${r.distance.toFixed(2)} km`
+                          : "— Location missing"}
                       </span>
-                    )}
-                  </p>
-                )}
+                    </h4>
+                    <span className="shrink-0 text-sm font-medium">
+                      {r.rating ?? "N/A"}★
+                    </span>
+                    </div>
+
+                  <p className="mt-1 text-sm text-gray-700">{r.address}</p>
+
+                  {r.hours && (
+                    <p className="mt-2 font-medium">
+                      <span
+                        className={`text-sm ${
+                          isRestaurantOpenToday(r.hours, currentDateTime)
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {isRestaurantOpenToday(r.hours, currentDateTime)
+                          ? "Open"
+                          : "Closed"}
+                      </span>
+                      <span className="ml-2 text-sm text-gray-500">
+                        {(() => {
+                          const dayName = new Date().toLocaleDateString("en-US", {
+                            weekday: "long",
+                          });
+                          const todayHours = r.hours.find(
+                            (entry) => entry[dayName]
+                          );
+                          if (!todayHours) return "(No hours set)";
+                          const opening = todayHours[dayName].Opening;
+                          const closing = todayHours[dayName].Closing;
+                          return `(${opening.slice(0, 2)}:${opening.slice(
+                            2
+                          )} - ${closing.slice(0, 2)}:${closing.slice(2)})`;
+                        })()}
+                      </span>
+                      {!isRestaurantAcceptingOrders(r.autoSetting) && (
+                        <span className="ml-2 text-red-600 text-sm font-medium">
+                          — Currently not accepting orders
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
               </div>
             </button>
           ))}
+          {isLoadingMore &&
+            Array.from({ length: 4 }).map((_, idx) => (
+              <RestaurantCardSkeleton key={`skeleton-${idx}`} />
+          ))}
+
         </div>
+        
       )}
+          {visibleRestaurants.length < filteredRestaurants.length && (
+            <div
+              ref={loadMoreRef}
+              className="py-4 text-center text-sm text-gray-500"
+            >
+            </div>
+          )}
     </>
   );
 }

@@ -92,7 +92,7 @@ export default function OrderHistoryTab({ loadingOrders, allOrders = [], archive
                 <p>
                   <strong>Status:</strong>{" "}
                   <span className="font-medium text-green-600">
-                    {order.deliveryStatus || "Picked Up"}
+                    {order.deliveryStatus}
                   </span>
                 </p>
                 <p className="mb-2">
