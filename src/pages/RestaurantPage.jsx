@@ -364,17 +364,15 @@ export default function RestaurantPage() {
           );
 
           // Update the order document
+          // Removed fields: courier_R_EtaMinutes: updates.courier_R_EtaMinutes || NaN, courier_U_EtaMinutes: updates.courier_U_EtaMinutes || NaN,
           updateBatch.update(orderRef, {
-            deliveryStatus: newDeliveryStatus,
-            courier_R_Distance: updates.C_R_distanceKm || NaN,
-            courier_R_EtaMinutes: updates.courier_R_EtaMinutes || NaN,
-            estimatedPickUpTime: updates.estimatedPickUpTimeTimestamp || null,
-            courier_U_Distance: updates.R_U_distanceKm || NaN,
-            courier_U_EtaMinutes: updates.courier_U_EtaMinutes || NaN,
-            total_Distance: updates.total_Distance || NaN,
-            estimatedDeliveryTime:
-              updates.estimatedDeliveryTimeTimestamp || null,
             courierLocation: courierLocation,
+            courier_R_Distance: updates.C_R_distanceKm || NaN,
+            courier_U_Distance: updates.R_U_distanceKm || NaN,
+            deliveryStatus: newDeliveryStatus,
+            estimatedPickUpTime: updates.estimatedPickUpTimeTimestamp || null,
+            estimatedDeliveryTime: updates.estimatedDeliveryTimeTimestamp || null,
+            total_Distance: updates.total_Distance || NaN,
           });
 
           // Prepare local state update

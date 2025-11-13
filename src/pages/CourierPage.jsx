@@ -41,6 +41,21 @@ export default function CourierPage() {
     currentTaskRef.current = currentTask;
   }, [currentTask]);
 
+  const CURRENT_TIME_MS = Date.now(); 
+  
+  const formatOrderTimestamp = (timestamp) => {
+    return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
+  };
+
+  const isOnTime = (currentTime, orderTime) => {
+    let orderTimeMs;
+    orderTimeMs = orderTime.seconds * 1000 + orderTime.nanoseconds / 1000000;    
+    if (currentTime > orderTimeMs) {
+        return false; 
+    } 
+    return true;
+  };
+
   const fetchCurrentTaskStatus = async (orderId, restaurantId) => {
     const task = currentTaskRef.current;
     if (!orderId || !restaurantId || !task) return;
@@ -623,8 +638,6 @@ export default function CourierPage() {
       )}
 
     {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
-    {/* set restaurantRange to the order.restaurantRange (less reads probably) */}
-    {/* make a condition to only display order.courier_R_Distance < order.restaurantRange */}
     {!currentTask && (
     <>
       <hr className="my-8 border-t-2 border-gray-300" />
@@ -635,15 +648,24 @@ export default function CourierPage() {
         <p>No tasks available.</p>
       ) : (
         <ul className="list-none space-y-4 text-gray-700"> 
-          {orders.map((order, idx) => (
+        {orders.sort((a, b) => {
+        // 1. Order by earliest prep time
+        const timeComparison = a.estimatedPreppedTime - b.estimatedPreppedTime;
+
+        if (timeComparison !== 0) {
+            return timeComparison;
+        }
+        // 2. Order by shortest total_Distance first
+        return a.total_Distance - b.total_Distance;
+      }).map((order, idx) => (
             <li key={idx} className="p-4 border rounded shadow-md bg-white">
               
-              {/* Table for Key Metrics (Tighter, Scanable Data) */}
               <table className="w-full text-sm mb-3">
                 <thead className="border-b bg-gray-50">
                   <tr>
                     <th className="py-2 px-2 text-left">Order ID</th>
                     <th className="py-2 px-2 text-left">Payout</th>
+                    <th className="py-2 px-2 text-left">Ready At</th>
                     <th className="py-2 px-2 text-left">Restaurant Distance: <span className="font-normal">{order.restaurantAddress}</span></th>
                     <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{order.userAddress}</span></th>
                   </tr>
@@ -651,9 +673,14 @@ export default function CourierPage() {
                 <tbody>
                   <tr>
                     <td className="py-1 px-2 font-semibold">{order.orderId}</td>
-                    <td className="py-1 px-2 font-semibold text-green-600">
+                    <td className="py-1 px-2 font-semibold">
                       ${Number(order.paymentCourier).toFixed(2)}
                     </td>
+                    <td className={`text-sm 
+                    ${isOnTime(CURRENT_TIME_MS, order.estimatedPreppedTime)
+                      ? "text-green-600"
+                      : "text-red-600"}`}>  
+                    {formatOrderTimestamp(order.estimatedPreppedTime)}</td>
                     <td className="py-1 px-2">{order.courier_R_Distance}km</td>
                     <td className="py-1 px-2">{order.total_Distance}km</td>
                   </tr>
@@ -683,8 +710,8 @@ export default function CourierPage() {
           ))}
         </ul>
       )}
-    </>
-)}
+      </>
+      )}
       </>
     ) : null}
   </div>

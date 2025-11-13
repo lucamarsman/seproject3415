@@ -48,9 +48,9 @@ export function calculateEtaRestaurant(locations, now, preppedDate) {
     return {
         C_R_distanceKm,
         R_U_distanceKm,
-        courier_R_EtaMinutes,
+        courier_R_EtaMinutes, //
         R_U_courierTime,
-        courier_U_EtaMinutes,
+        courier_U_EtaMinutes, //
         total_Distance,
         estimatedPickUpTimeTimestamp,
         estimatedDeliveryTimeTimestamp,

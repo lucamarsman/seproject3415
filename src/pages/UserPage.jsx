@@ -63,7 +63,18 @@ export default function UserPage() {
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
   const [profileImgInput, setProfileImgInput] = useState("");
-    
+  
+  //"Routing" to a child tab when redirect to /user ; example: /user?activeTab=settings from OrderPage
+  useEffect(() => {
+      const params = new URLSearchParams(location.search);
+      const tabFromUrl = params.get('activeTab');
+      if (tabFromUrl && ["home", "orders", "messages", "settings"].includes(tabFromUrl)) {
+          setActiveTab(tabFromUrl);
+      } else if (!tabFromUrl && location.pathname === '/user') {
+          setActiveTab("home");
+      }
+  }, [location.search]);
+
   const clearFormMessages = () => {
     setFormError("");
     setFormSuccess("");

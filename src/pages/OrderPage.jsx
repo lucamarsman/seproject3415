@@ -83,7 +83,7 @@ export default function OrderPage() {
       }
     });
     
-    setTotal(newTotal); //divide this up into // paymentCourier , // paymentPlatform , //paymentRestaurant
+    setTotal(newTotal);//divide this up into // paymentCourier , // paymentPlatform , //paymentRestaurant
   }, [quantities, restaurant, selectedModifications]);
 
 
@@ -180,7 +180,7 @@ export default function OrderPage() {
     const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
     const paymentRestaurant = total - commissionAmount;
     const paymentCourier  = COURIER_BASE_PAY + customerTip;
-    const paymentPlatform = commissionAmount - COURIER_BASE_PAY; 
+    const paymentPlatform = commissionAmount - COURIER_BASE_PAY;
 
     if (!userData?.deliveryLocation) {
       alert("Missing user location.");
@@ -232,37 +232,34 @@ export default function OrderPage() {
       const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 60000);
 
       // Step 4: Construct the order document 
+      // Removed fields: courierArray: [], courierRejectArray: [], estimatedDeliveryTime: null, estimatedPickUpTime: null,
       const newOrder = {
         createdAt: createdAt,
-        courierArray: [],
-        //courierRejectArray: [], //preventing too many read/writes
+        //confirmedTime: null, //
         courierConfirmed: false,
         courierPickedUp: false,
         courierId: "",
-        orderTimeout: orderTimeout,
-        deliveryStatus: "Awaiting restaurant confirmation.", //
-        deliveryConfirmed: false, //
-        orderCompleted: false, //
-        orderConfirmed: null,
-        orderId,
-        restaurantId,
-        userId,
-        items,
-        payment: total,
-        paymentCourier: paymentCourier , //
-        paymentPlatform: paymentPlatform, //
-        paymentRestaurant: paymentRestaurant, //
-        totalPrepTime,
-        confirmedTime: null,
-        estimatedDeliveryTime: null,
-        estimatedPickUpTime: null,
         estimatedPreppedTime: null,
+        deliveryStatus: "Awaiting restaurant confirmation.",
+        //deliveryConfirmed: false,
+        items,
+        orderCompleted: false,
+        orderConfirmed: null, // need this null
+        orderId,
+        orderTimeout: orderTimeout,
+        payment: total,
+        paymentCourier: paymentCourier ,
+        paymentPlatform: paymentPlatform,
+        paymentRestaurant: paymentRestaurant,
+        restaurantId,
         restaurantAddress: restaurant.address || "",
         restaurantLocation: coordinateFormat(restaurant.location),
-        storeName: restaurant.storeName,
-        userAddress: userData.address,
-        userLocation: coordinateFormat(userData.deliveryLocation),
         restaurantNote: restaurantNote,
+        storeName: restaurant.storeName,
+        totalPrepTime,
+        userAddress: userData.address,
+        userId,
+        userLocation: coordinateFormat(userData.deliveryLocation),
       };
 
       // Step 5 & 6: Save to Firestore and Increment totalOrders
@@ -294,7 +291,7 @@ export default function OrderPage() {
       return <div className="p-6 text-center text-xl">Checking authentication...</div>;
   }
   if (!userId) {
-      return null; 
+      return null;
   }
   if (!restaurant) {
       return <div className="p-6 text-center text-xl">Loading restaurant details...</div>;
@@ -311,7 +308,7 @@ export default function OrderPage() {
                   Please update your settings to proceed with the order.
               </p>
               <button
-                  onClick={() => navigate('/settings')}
+                  onClick={() => navigate('/user?activeTab=settings')}
                   className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
               >
                   Go to Settings
