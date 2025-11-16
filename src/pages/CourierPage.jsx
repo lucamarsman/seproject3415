@@ -3,22 +3,50 @@ import { onAuthStateChanged } from "firebase/auth";
 import { Navigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import {
-  collection,
-  getDocs,
-  getDoc,
-  addDoc,
-  GeoPoint,
-  updateDoc,
   doc,
-  writeBatch,
-  Timestamp,
-  increment,
+  getDoc,
+  updateDoc,
   query,
   where,
+  collection,
+  onSnapshot,
+  getDocs,
+  GeoPoint,
+  writeBatch,
+  addDoc,
+  increment,
+  Timestamp,
 } from "firebase/firestore";
 import { calcLocalCourierDist } from "../utils/calcLocalCourierDist.js";
-import { coordinateFormat } from '../utils/coordinateFormat';
-import { calculateEtaCourier } from '../utils/calculateEtaCourier';
+import { coordinateFormat } from "../utils/coordinateFormat";
+import { calculateEtaCourier } from "../utils/calculateEtaCourier";
+
+// Simple runtime guard so UI does not fully crash
+const safeWrap = (fn) => {
+  try {
+    fn();
+  } catch (err) {
+    console.error("Runtime error in CourierPage:", err);
+  }
+};
+
+// Utility: Calculate meters between two lat/lon points (Haversine)
+const metersBetween = (a, b) => {
+  const R = 6371000;
+  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+  const lat1 = (a.latitude * Math.PI) / 180;
+  const lat2 = (b.latitude * Math.PI) / 180;
+
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+
+  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+};
+
+const MAX_ACCEPT_DISTANCE_METERS = 10000; // 10 km radius to accept a task
+const SIM_ORIGIN = { latitude: 44.356118, longitude: -79.627597 }; // Harman home (dev simulator)
 
 export default function CourierPage() {
   const [user, setUser] = useState(null);
@@ -30,8 +58,44 @@ export default function CourierPage() {
   const [orders, setOrders] = useState([]);
   const [fetchingOrders, setFetchingOrders] = useState(true);
   const [currentTask, setCurrentTask] = useState(null);
+
   const courierDataRef = useRef(courierData);
   const currentTaskRef = useRef(currentTask);
+
+  const lastGPSRef = useRef(null);
+  const lastETARef = useRef(null);
+  const movementRef = useRef({ lastMoveTime: 0 });
+  const movementStateRef = useRef("IDLE"); // IDLE | MOVING | NEAR_DESTINATION | STOPPED_TOO_LONG
+  const lastUpdateTimeRef = useRef(0); // throttle Firestore location updates
+
+  // UI movement meta: status text, ETA, last GPS update, etc.
+  const [movementMeta, setMovementMeta] = useState({
+    lastUpdate: null,
+    gpsAccuracy: null,
+    speedKmh: null,
+    phase: "Idle",
+    etaMinutes: null,
+    distToRestaurantKm: null,
+    distToUserKm: null,
+  });
+
+  // Simple simulator for dev: fake GPS from Harman's home towards target
+  const [simulator, setSimulator] = useState({
+    enabled: true, // dev: turn off in production
+    running: false,
+    speedKmh: 30,
+    stepMs: 2000,
+    origin: SIM_ORIGIN,
+    target: null,
+  });
+  const simulatorIntervalRef = useRef(null);
+
+  const updateMovementState = (newState) => {
+    if (movementStateRef.current !== newState) {
+      movementStateRef.current = newState;
+      console.log("Movement state changed →", newState);
+    }
+  };
 
   useEffect(() => {
     courierDataRef.current = courierData;
@@ -41,19 +105,17 @@ export default function CourierPage() {
     currentTaskRef.current = currentTask;
   }, [currentTask]);
 
-  const CURRENT_TIME_MS = Date.now(); 
-  
+  const CURRENT_TIME_MS = Date.now();
+
   const formatOrderTimestamp = (timestamp) => {
     return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
   };
 
   const isOnTime = (currentTime, orderTime) => {
-    let orderTimeMs;
-    orderTimeMs = orderTime.seconds * 1000 + orderTime.nanoseconds / 1000000;    
-    if (currentTime > orderTimeMs) {
-        return false; 
-    } 
-    return true;
+    if (!orderTime || typeof orderTime.seconds !== "number") return false;
+    const orderTimeMs =
+      orderTime.seconds * 1000 + orderTime.nanoseconds / 1000000;
+    return currentTime <= orderTimeMs;
   };
 
   const fetchCurrentTaskStatus = async (orderId, restaurantId) => {
@@ -61,26 +123,32 @@ export default function CourierPage() {
     if (!orderId || !restaurantId || !task) return;
 
     try {
-        const orderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
-        const orderSnap = await getDoc(orderRef);
+      const orderRef = doc(
+        db,
+        "restaurants",
+        restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+      const orderSnap = await getDoc(orderRef);
 
-        if (!orderSnap.exists()) {
-            console.warn(`Order document not found: ${orderId}`);
-            if (task.orderId === orderId) setCurrentTask(null);
-            return;
-        }
+      if (!orderSnap.exists()) {
+        console.warn(`Order document not found: ${orderId}`);
+        if (task.orderId === orderId) setCurrentTask(null);
+        return;
+      }
 
-        const updatedPickupStatus = !!orderSnap.data().courierPickedUp;
-        
-        if (updatedPickupStatus !== task.courierPickedUp) {
-            setCurrentTask(prev => ({
-                ...prev,
-                courierPickedUp: updatedPickupStatus, 
-            }));
-            console.log(`Task pickup status updated to: ${updatedPickupStatus}`);
-        }
+      const updatedPickupStatus = !!orderSnap.data().courierPickedUp;
+
+      if (updatedPickupStatus !== task.courierPickedUp) {
+        setCurrentTask((prev) => ({
+          ...prev,
+          courierPickedUp: updatedPickupStatus,
+        }));
+        console.log(`Task pickup status updated to: ${updatedPickupStatus}`);
+      }
     } catch (error) {
-        console.error("Error fetching task status:", error);
+      console.error("Error fetching task status:", error);
     }
   };
 
@@ -90,21 +158,24 @@ export default function CourierPage() {
     if (!currentCourierId) return;
 
     if (updates.location) {
-        updates.location = new GeoPoint(updates.location.latitude, updates.location.longitude);
+      updates.location = new GeoPoint(
+        updates.location.latitude,
+        updates.location.longitude
+      );
     }
 
     const courierDocRef = doc(db, "couriers", currentCourierId);
     try {
-        await updateDoc(courierDocRef, updates);
-        
-        setCourierData((prev) => ({ ...prev, ...updates }));
+      await updateDoc(courierDocRef, updates);
+
+      setCourierData((prev) => ({ ...prev, ...updates }));
     } catch (err) {
-        console.error("Failed to update courier document:", err);
-        if (updates.status) {
-             setError(`Failed to update status to ${updates.status}.`);
-        }
+      console.error("Failed to update courier document:", err);
+      if (updates.status) {
+        setError(`Failed to update status to ${updates.status}.`);
+      }
     }
-};
+  };
 
   // Helper: Returns a user-friendly location error message based on code
   const getLocationErrorMessage = (code) => {
@@ -135,15 +206,15 @@ export default function CourierPage() {
 
     const couriersRef = collection(db, "couriers");
     const fetchOrCreateCourier = async () => {
-        try {
-          const q = query(couriersRef, where("email", "==", user.email));
-          const snapshot = await getDocs(q);
+      try {
+        const q = query(couriersRef, where("email", "==", user.email));
+        const snapshot = await getDocs(q);
 
-          if (!snapshot.empty) {
-              const matchedDoc = snapshot.docs[0];
-              setCourierData({ id: matchedDoc.id, ...matchedDoc.data() });
-              setFetchingCourier(false);
-              return;
+        if (!snapshot.empty) {
+          const matchedDoc = snapshot.docs[0];
+          setCourierData({ id: matchedDoc.id, ...matchedDoc.data() });
+          setFetchingCourier(false);
+          return;
         }
 
         if (!navigator.geolocation) {
@@ -156,11 +227,11 @@ export default function CourierPage() {
 
         navigator.geolocation.getCurrentPosition(
           async (position) => {
-            const { latitude, longitude } = position.coords;
+            const { latitude, longitude, accuracy } = position.coords;
 
             const newCourier = {
               email: user.email,
-              name: user.displayName,
+              name: user.displayName || user.email,
               earnings: 0,
               location: new GeoPoint(latitude, longitude),
               movementFlag: "inactive",
@@ -170,7 +241,19 @@ export default function CourierPage() {
             const docRef = await addDoc(couriersRef, newCourier);
             await updateDoc(docRef, { courierId: docRef.id });
 
-            setCourierData({ id: docRef.id, courierId: docRef.id, ...newCourier });
+            setCourierData({
+              id: docRef.id,
+              courierId: docRef.id,
+              ...newCourier,
+            });
+
+            setMovementMeta((prev) => ({
+              ...prev,
+              lastUpdate: Date.now(),
+              gpsAccuracy: accuracy ?? null,
+              phase: "Idle",
+            }));
+
             setFetchingCourier(false);
           },
           (err) => {
@@ -181,12 +264,6 @@ export default function CourierPage() {
             if (err.code === 1) {
               setLocationAccessDenied(true);
             }
-
-            // USE THIS ONLY IF MOBILE IS AVAILABLE
-            /*
-            if (courierData?.id && courierData.status !== "inactive") {
-              updateCourierStatus("inactive");
-            }*/
 
             setFetchingCourier(false);
           }
@@ -201,30 +278,35 @@ export default function CourierPage() {
     fetchOrCreateCourier();
   }, [user]);
 
-  // Helper: Update Order Task ETA
+  // Helper: Update Order Task ETA (Firestore + local currentTask)
   const updateCourierTask = async (latestFormattedLocation) => {
     const task = currentTaskRef.current;
     const courier = courierDataRef.current;
-    
+
     const courierLocation = latestFormattedLocation;
-    
+
     if (!task || !courier || !courierLocation || task.orderCompleted) {
       return;
     }
 
     const userLoc = task.userLocation;
     const now = new Date();
-    
+
     const formattedCourierLoc = courierLocation;
     const formattedUserLoc = coordinateFormat(userLoc);
 
-    const locationValid = (
-      formattedCourierLoc && typeof formattedCourierLoc.latitude === 'number' && typeof formattedCourierLoc.longitude === 'number' &&
-      formattedUserLoc && typeof formattedUserLoc.latitude === 'number' && typeof formattedUserLoc.longitude === 'number'
-    );
+    const locationValid =
+      formattedCourierLoc &&
+      typeof formattedCourierLoc.latitude === "number" &&
+      typeof formattedCourierLoc.longitude === "number" &&
+      formattedUserLoc &&
+      typeof formattedUserLoc.latitude === "number" &&
+      typeof formattedUserLoc.longitude === "number";
 
     if (!locationValid) {
-      console.warn(`Location data invalid for task ${task.orderId}. Cannot calculate ETA.`);
+      console.warn(
+        `Location data invalid for task ${task.orderId}. Cannot calculate ETA.`
+      );
       return;
     }
 
@@ -247,14 +329,13 @@ export default function CourierPage() {
 
       try {
         await updateDoc(orderDocRef, updates);
-        
-        // Update local state 
-        setCurrentTask(prev => ({ 
-            ...prev, 
-            ...updates,
-            estimatedDeliveryTime: updates.estimatedDeliveryTime 
+
+        // Update local state
+        setCurrentTask((prev) => ({
+          ...prev,
+          ...updates,
+          estimatedDeliveryTime: updates.estimatedDeliveryTime,
         }));
-        
       } catch (err) {
         console.error(`Failed to update task ${task.orderId} ETA:`, err);
         setError("Failed to update task ETA.");
@@ -262,151 +343,493 @@ export default function CourierPage() {
     }
   };
 
-
-  // 3. UNIFIED INTERVAL (5000 MS) for Location Fetching and Database Writes
+  // --- GPS Throttling, Movement Analysis & Location Update ---
   useEffect(() => {
-    const courierId = courierData?.id;
-    if (!courierId || !navigator.geolocation) return;
-    const currentOrders = orders;
-    const fetchAndWriteLocation = async () => {
-        if (locationAccessDenied) return;
+    // Skip real GPS when simulator is enabled
+    if (simulator.enabled) return;
+    if (!navigator.geolocation || !courierData?.id) return;
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const { latitude, longitude } = position.coords;
-                const formattedLocation = { latitude, longitude };
-                const courierCoords = { latitude, longitude }; // Define once here
+    const watcher = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const now = Date.now();
+        const newLoc = { latitude, longitude };
 
-                // 1. LOCATION UPDATE (Always runs)
-                setCourierData((prev) => ({
-                    ...prev,
-                    location: formattedLocation,
-                }));
-                updateCourierDoc({ location: formattedLocation });
+        const last = lastGPSRef.current;
 
-                if (currentTaskRef.current) {
-                    updateCourierTask(formattedLocation);
+        let moved = 0;
+        if (last && typeof last.latitude === "number") {
+          moved = metersBetween(last, newLoc);
 
-                    fetchCurrentTaskStatus( 
-                        currentTaskRef.current.orderId, 
-                        currentTaskRef.current.restaurantId 
-                    );
-                }
-                
-                // 3. TASK LIST UPDATE, IF A NEW TASK EXISTS
-                if (!currentTaskRef.current || currentOrders.length === 0) {
-                    
-                    const { availableOrders, assignedOrder } = await fetchAllOrders(courierData.courierId);
+          // Very small movement -> treat as potential stop, don't spam updates
+          if (moved < 1) {
+            const stoppedFor = now - (movementRef.current.lastMoveTime || now);
+            if (stoppedFor > 120000) {
+              updateMovementState("STOPPED_TOO_LONG");
+              // Optionally reflect this in Firestore without location spam
+              updateCourierDoc({ movementFlag: movementStateRef.current });
+            }
 
-                    // --- REDUNDANCY REMOVED: USE calcLocalCourierDist ---
-                    const ordersWithDistances = availableOrders.map(order => {
-                        const distances = calcLocalCourierDist(order, courierCoords);
-                        return {
-                            ...order,
-                            ...distances,
-                        };
-                    });
+            // Still update basic meta (GPS time / accuracy)
+            setMovementMeta((prev) => ({
+              ...prev,
+              lastUpdate: now,
+              gpsAccuracy: accuracy ?? prev.gpsAccuracy,
+            }));
 
-                    // ... (rest of the if block remains the same) ...
-                    const currentOrderIds = new Set(currentOrders.map(o => o.orderId));
-                    const newAvailableOrderIds = new Set(ordersWithDistances.map(o => o.orderId));
-                    
-                    const hasNewOrders = ordersWithDistances.some(order => !currentOrderIds.has(order.orderId));
-                    const hasRemovedOrders = currentOrders.some(order => !newAvailableOrderIds.has(order.orderId));
+            return;
+          }
 
-                    if (hasNewOrders || hasRemovedOrders || currentOrders.length === 0) {
-                        setOrders(ordersWithDistances);
-                        setCurrentTask(assignedOrder);
-                        setFetchingOrders(false);
-                        console.log(`Task list updated: ${ordersWithDistances.length} tasks now available.`);
-                    }
-                
-                } else {
-                    const { assignedOrder } = await fetchAllOrders(courierData.courierId);
-                    if (!assignedOrder && currentTaskRef.current) {
-                        setCurrentTask(null);
-                        setFetchingOrders(false);
-                    }
-                }
+          // Significant movement detected
+          movementRef.current.lastMoveTime = now;
+        } else {
+          // First valid location reading
+          movementRef.current.lastMoveTime = now;
+        }
 
-                if (locationAccessDenied) {
-                    setLocationAccessDenied(false);
-                    setError("");
-                }
-            },
-            (err) => {
-                console.error("Location error during interval:", err.code, err.message);
+        // --- Smart Task Phase & Distance Computation (Option 3) ---
+        const task = currentTaskRef.current;
+        let phaseLabel = "Available";
+        let distToRestaurantMeters = null;
+        let distToUserMeters = null;
 
-                if (err.code === 1) {
-                    setLocationAccessDenied(true);
-                    setError(getLocationErrorMessage(err.code));
-                    if (courierDataRef.current?.status !== "inactive") {
-                        updateCourierDoc({ status: "inactive" });
-                    }
-                } 
-            },
-            { enableHighAccuracy: true, maximumAge: 0 } 
-        );
-    };
-    const interval = setInterval(fetchAndWriteLocation, 5000);
-    fetchAndWriteLocation(); 
+        if (task) {
+          try {
+            // 1) Distance to restaurant
+            if (task.restaurantLocation) {
+              const restLoc = coordinateFormat(task.restaurantLocation);
+              if (
+                restLoc &&
+                typeof restLoc.latitude === "number" &&
+                typeof restLoc.longitude === "number"
+              ) {
+                distToRestaurantMeters = metersBetween(newLoc, restLoc);
+              }
+            }
+
+            // 2) Distance to user
+            if (task.userLocation) {
+              const userLoc = coordinateFormat(task.userLocation);
+              if (
+                userLoc &&
+                typeof userLoc.latitude === "number" &&
+                typeof userLoc.longitude === "number"
+              ) {
+                distToUserMeters = metersBetween(newLoc, userLoc);
+              }
+            }
+
+            // 3) Determine phase based on pickup + distances
+            if (!task.courierPickedUp) {
+              // Before pickup
+              if (
+                typeof distToRestaurantMeters === "number" &&
+                distToRestaurantMeters < 60
+              ) {
+                phaseLabel = "Arrived at restaurant";
+                updateMovementState("NEAR_DESTINATION");
+              } else if (
+                typeof distToRestaurantMeters === "number" &&
+                distToRestaurantMeters < 5000
+              ) {
+                phaseLabel = "Heading to restaurant";
+                updateMovementState("MOVING");
+              } else {
+                phaseLabel = "Travelling";
+              }
+            } else {
+              // After pickup
+              if (
+                typeof distToUserMeters === "number" &&
+                distToUserMeters < 40
+              ) {
+                phaseLabel = "Arrived near customer";
+                updateMovementState("NEAR_DESTINATION");
+              } else if (
+                typeof distToUserMeters === "number" &&
+                distToUserMeters < 5000
+              ) {
+                phaseLabel = "Delivering order";
+                updateMovementState("MOVING");
+              } else {
+                phaseLabel = "On delivery route";
+              }
+            }
+          } catch (e) {
+            console.warn("Movement analysis error:", e);
+          }
+        } else {
+          // No active task
+          phaseLabel = "Available for tasks";
+          updateMovementState("IDLE");
+        }
+
+        // Cache latest GPS with timestamp
+        lastGPSRef.current = { ...newLoc, timestamp: now };
+
+        // Throttle Firestore updates to ~1.5s minimum interval
+        const sinceLastUpdate = now - (lastUpdateTimeRef.current || 0);
+        if (sinceLastUpdate < 1500) {
+          // Even if we don't write to Firestore, still update meta in UI
+          const distUserKm =
+            typeof distToUserMeters === "number"
+              ? distToUserMeters / 1000
+              : null;
+          const distRestKm =
+            typeof distToRestaurantMeters === "number"
+              ? distToRestaurantMeters / 1000
+              : null;
+
+          let speedKmh = null;
+          if (last && last.timestamp && moved > 0) {
+            const dtSec = (now - last.timestamp) / 1000;
+            if (dtSec > 0.5) {
+              speedKmh = Math.round((moved / 1000 / dtSec) * 3600);
+            }
+          }
+
+          let etaMinutes = null;
+          if (task && task.courierPickedUp && distToUserMeters != null) {
+            const distKm = distToUserMeters / 1000;
+            const assumedSpeed = 30; // km/h
+            etaMinutes = Math.max(
+              1,
+              Math.round((distKm / assumedSpeed) * 60)
+            );
+          }
+
+          setMovementMeta((prev) => ({
+            ...prev,
+            lastUpdate: now,
+            gpsAccuracy: accuracy ?? prev.gpsAccuracy,
+            speedKmh,
+            phase: phaseLabel,
+            etaMinutes,
+            distToRestaurantKm: distRestKm,
+            distToUserKm: distUserKm,
+          }));
+
+          return;
+        }
+        lastUpdateTimeRef.current = now;
+
+        // Derive a simple courier status from movement state
+        let nextStatus = "active";
+        if (
+          movementStateRef.current === "STOPPED_TOO_LONG" ||
+          movementStateRef.current === "IDLE"
+        ) {
+          nextStatus = "inactive";
+        }
+
+        // Push updated location, movement state & status to Firestore
+        updateCourierDoc({
+          location: newLoc,
+          movementFlag: movementStateRef.current,
+          status: nextStatus,
+        });
+
+        // Update task ETA (Firestore) if applicable
+        updateCourierTask(newLoc);
+
+        // Update UI movement meta
+        const distUserKm =
+          typeof distToUserMeters === "number"
+            ? distToUserMeters / 1000
+            : null;
+        const distRestKm =
+          typeof distToRestaurantMeters === "number"
+            ? distToRestaurantMeters / 1000
+            : null;
+
+        let speedKmh = null;
+        if (last && last.timestamp && moved > 0) {
+          const dtSec = (now - last.timestamp) / 1000;
+          if (dtSec > 0.5) {
+            speedKmh = Math.round((moved / 1000 / dtSec) * 3600);
+          }
+        }
+
+        let etaMinutes = null;
+        if (task && task.courierPickedUp && distToUserMeters != null) {
+          const distKm = distToUserMeters / 1000;
+          const assumedSpeed = 30; // km/h
+          etaMinutes = Math.max(1, Math.round((distKm / assumedSpeed) * 60));
+        }
+
+        setMovementMeta((prev) => ({
+          ...prev,
+          lastUpdate: now,
+          gpsAccuracy: accuracy ?? prev.gpsAccuracy,
+          speedKmh,
+          phase: phaseLabel,
+          etaMinutes,
+          distToRestaurantKm: distRestKm,
+          distToUserKm: distUserKm,
+        }));
+      },
+      (err) => {
+        console.warn("GPS error:", err);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watcher);
+  }, [courierData?.id, simulator.enabled]);
+
+  // --- Simulator GPS effect ---
+  useEffect(() => {
+    if (!simulator.enabled || !simulator.running) return;
+    if (!courierData?.id) return;
+    if (!simulator.target) return;
+
+    // clear any previous interval
+    if (simulatorIntervalRef.current) {
+      clearInterval(simulatorIntervalRef.current);
+    }
+
+    simulatorIntervalRef.current = setInterval(() => {
+      safeWrap(async () => {
+        const task = currentTaskRef.current;
+        const now = Date.now();
+
+        // current simulated position (fallback to origin)
+        const current =
+          lastGPSRef.current && typeof lastGPSRef.current.latitude === "number"
+            ? lastGPSRef.current
+            : { ...simulator.origin, timestamp: now };
+
+        const target = simulator.target;
+        if (
+          !target ||
+          typeof target.latitude !== "number" ||
+          typeof target.longitude !== "number"
+        ) {
+          console.warn("Simulator target is invalid, stopping.");
+          setSimulator((prev) => ({ ...prev, running: false }));
+          return;
+        }
+
+        const distMeters = metersBetween(current, target);
+
+        // Arrived near target
+        if (distMeters < 10) {
+          lastGPSRef.current = { ...target, timestamp: now };
+          updateMovementState("NEAR_DESTINATION");
+          await updateCourierDoc({
+            location: target,
+            movementFlag: "NEAR_DESTINATION",
+            status: "active",
+          });
+          await updateCourierTask(target);
+          setMovementMeta((prev) => ({
+            ...prev,
+            lastUpdate: now,
+            speedKmh: 0,
+            phase: "Sim · Arrived at restaurant",
+            distToRestaurantKm: 0,
+          }));
+          setSimulator((prev) => ({ ...prev, running: false }));
+          return;
+        }
+
+        // Move a small step towards target based on speed and stepMs
+        const speedMps = (simulator.speedKmh * 1000) / 3600;
+        const dtSec = simulator.stepMs / 1000;
+        const travel = speedMps * dtSec;
+        const ratio = Math.min(1, travel / distMeters);
+
+        const next = {
+          latitude:
+            current.latitude + (target.latitude - current.latitude) * ratio,
+          longitude:
+            current.longitude + (target.longitude - current.longitude) * ratio,
+        };
+
+        lastGPSRef.current = { ...next, timestamp: now };
+        updateMovementState("MOVING");
+
+        await updateCourierDoc({
+          location: next,
+          movementFlag: "MOVING",
+          status: "active",
+        });
+        await updateCourierTask(next);
+
+        const remainingMeters = Math.max(0, distMeters - travel);
+        const remainingKm = remainingMeters / 1000;
+        let etaMinutes = null;
+        if (simulator.speedKmh > 0 && remainingKm > 0) {
+          etaMinutes = Math.max(
+            1,
+            Math.round((remainingKm / simulator.speedKmh) * 60)
+          );
+        }
+
+                const distKm = distMeters / 1000;
+
+        setMovementMeta((prev) => ({
+          ...prev,
+          lastUpdate: now,
+          speedKmh: simulator.speedKmh,
+          phase: task
+            ? task.courierPickedUp
+              ? "Sim · Delivering"
+              : "Sim · Heading to restaurant"
+            : "Sim · Moving",
+          etaMinutes,
+          distToRestaurantKm:
+            task && !task.courierPickedUp ? distKm : prev.distToRestaurantKm,
+          distToUserKm:
+            task && task.courierPickedUp ? distKm : prev.distToUserKm,
+        }));
+      });
+    }, simulator.stepMs);
 
     return () => {
-        clearInterval(interval);
+      if (simulatorIntervalRef.current) {
+        clearInterval(simulatorIntervalRef.current);
+        simulatorIntervalRef.current = null;
+      }
     };
-  }, [courierData?.id, locationAccessDenied, orders]);
+  }, [
+    simulator.enabled,
+    simulator.running,
+    simulator.speedKmh,
+    simulator.stepMs,
+    simulator.target,
+    courierData?.id,
+  ]);
 
-  // 4. Fetch Orders, handleAccept, handleReject
-  const fetchAllOrders = async (courierId) => {
-    try {
-        const restaurantsRef = collection(db, "restaurants");
-        const restaurantsSnapshot = await getDocs(restaurantsRef);
-
-        let availableOrders = [];
-        let assignedOrder = null;
-
-        for (const restaurantDoc of restaurantsSnapshot.docs) {
-            const restaurantId = restaurantDoc.id;
-            const ordersRef = collection(
-                db,
-                "restaurants",
-                restaurantId,
-                "restaurantOrders"
-            );
-            const ordersSnapshot = await getDocs(ordersRef);
-            ordersSnapshot.forEach((orderDoc) => {
-                const orderData = orderDoc.data();
-                const fullOrder = { ...orderData, restaurantId, orderId: orderDoc.id }; 
-                
-                if (orderData.orderCompleted === true) {
-                    return; 
-                }
-                // POPULATE CURRENT TASK
-                if (
-                    orderData.orderConfirmed === true &&
-                    orderData.courierId === courierId
-                ) {
-                    assignedOrder = fullOrder;
-                }
-                // POPULATE TASK LIST
-                else if (
-                    orderData.orderConfirmed === true &&
-                    orderData.courierId === ""
-                ) {
-                    availableOrders.push(fullOrder);
-                }
-            });
+  /* --- REALTIME COURIER LISTENER (Phase 1) --- */
+  useEffect(() => {
+    if (!courierData?.id) return;
+    const ref = doc(db, "couriers", courierData.id);
+    const unsub = onSnapshot(ref, (snap) => {
+      safeWrap(() => {
+        if (snap.exists()) {
+          setCourierData((prev) => ({ ...prev, ...snap.data() }));
         }
-        return { availableOrders, assignedOrder };
-    } catch (err) {
-        console.error("Error fetching orders:", err);
-        setError("Failed to fetch orders.");
-        return { availableOrders: [], assignedOrder: null };
-    }
-  };
+      });
+    });
+    return () => unsub();
+  }, [courierData?.id]);
 
-  // handleAccept 
+  /* --- REALTIME TASK LISTENER (Phase 2) --- */
+  useEffect(() => {
+    if (!courierData?.currentTask) {
+      setCurrentTask(null);
+      return;
+    }
+    const { currentTask: taskId, currentRestaurant: restId } = courierData;
+    if (!taskId || !restId) return;
+
+    const ref = doc(db, "restaurants", restId, "restaurantOrders", taskId);
+    const unsub = onSnapshot(ref, (snap) => {
+      safeWrap(() => {
+        if (snap.exists()) {
+          setCurrentTask({ orderId: snap.id, ...snap.data() });
+        }
+      });
+    });
+    return () => unsub();
+  }, [courierData?.currentTask]);
+
+  /* --- REALTIME AVAILABLE ORDERS LISTENER (Phase 3) --- */
+  const [restaurantListeners, setRestaurantListeners] = useState([]);
+
+  useEffect(() => {
+    async function setupListeners() {
+      restaurantListeners.forEach((unsub) => unsub());
+      const restaurantsSnap = await getDocs(collection(db, "restaurants"));
+      const newListeners = [];
+
+      restaurantsSnap.forEach((rest) => {
+        const ordersRef = collection(
+          db,
+          "restaurants",
+          rest.id,
+          "restaurantOrders"
+        );
+        const q = query(
+          ordersRef,
+          where("orderConfirmed", "==", true),
+          where("orderCompleted", "==", false),
+          where("courierId", "==", "")
+        );
+
+        const unsub = onSnapshot(q, (snap) => {
+          safeWrap(() => {
+            const list = [];
+            snap.forEach((o) =>
+              list.push({ orderId: o.id, restaurantId: rest.id, ...o.data() })
+            );
+
+            setOrders((prev) => {
+              const map = new Map();
+
+              // Keep existing orders from other restaurants
+              prev.forEach((o) => {
+                if (o.restaurantId !== rest.id) {
+                  map.set(`${o.restaurantId}__${o.orderId}`, o);
+                }
+              });
+
+              // Add/replace orders for this restaurant
+              list.forEach((o) => {
+                map.set(`${o.restaurantId}__${o.orderId}`, o);
+              });
+
+              return Array.from(map.values());
+            });
+          });
+        });
+
+        newListeners.push(unsub);
+      });
+
+      setRestaurantListeners(newListeners);
+      setFetchingOrders(false);
+    }
+
+    setupListeners();
+    return () => restaurantListeners.forEach((unsub) => unsub());
+  }, [courierData?.id]);
+
+  // handleAccept
   const handleAccept = async (order) => {
+    // Require courier to be near the restaurant before accepting the task
+    if (!simulator.enabled && courierData?.location && order?.restaurantLocation) {
+      try {
+        const courierLoc = {
+          latitude: courierData.location.latitude,
+          longitude: courierData.location.longitude,
+        };
+        const restLoc = coordinateFormat(order.restaurantLocation);
+
+        if (
+          restLoc &&
+          typeof restLoc.latitude === "number" &&
+          typeof restLoc.longitude === "number"
+        ) {
+          const dist = metersBetween(courierLoc, restLoc);
+          if (dist > MAX_ACCEPT_DISTANCE_METERS) {
+            alert(
+              "You are too far from this restaurant to accept this delivery. Move closer and try again."
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Distance check failed, allowing accept as fallback:", e);
+      }
+    }
+
+    // Optional: vibrate on accept (mobile UX)
+    if ("vibrate" in navigator) {
+      navigator.vibrate([120, 80, 120]);
+    }
+
     try {
       const orderDocRef = doc(
         db,
@@ -432,108 +855,265 @@ export default function CourierPage() {
 
       setCurrentTask({ ...order, courierId: courierData.courierId });
       setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
+
+      // Auto-start simulator from Harman's home to the restaurant (dev only)
+      if (simulator.enabled) {
+        const origin = SIM_ORIGIN;
+        const targetLoc = order.restaurantLocation
+          ? coordinateFormat(order.restaurantLocation)
+          : null;
+
+        if (
+          targetLoc &&
+          typeof targetLoc.latitude === "number" &&
+          typeof targetLoc.longitude === "number"
+        ) {
+          lastGPSRef.current = { ...origin, timestamp: Date.now() };
+          updateCourierDoc({
+            location: origin,
+            movementFlag: "MOVING",
+            status: "active",
+          });
+          setSimulator((prev) => ({
+            ...prev,
+            running: true,
+            origin,
+            target: targetLoc,
+          }));
+        }
+      }
     } catch (err) {
       console.error("Error accepting order:", err);
       setError("Failed to accept order.");
     }
   };
 
-  /*
-  const handleReject = async (order) => {
+    const handlePickupOrder = async (orderId) => {
+    if (!orderId || !courierData?.id) return;
+
+    const task = currentTaskRef.current;
+    if (!task || task.orderId !== orderId) {
+      console.error("Task not found or mismatch for orderId:", orderId);
+      alert("Current task data is missing or mismatched.");
+      return;
+    }
+
+    if (task.courierPickedUp) {
+      // Already picked up
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Confirm that you have picked up this order from the restaurant?"
+      )
+    ) {
+      return;
+    }
+
     try {
-      const orderDocRef = doc(
+      const orderRef = doc(
         db,
         "restaurants",
-        order.restaurantId,
+        task.restaurantId,
         "restaurantOrders",
-        order.orderId
+        orderId
       );
-      await updateDoc(orderDocRef, {
-        courierConfirmed: false,
-        //courierRejectArray: courierData.courierId,
-      });
-      setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
+
+      const updates = {
+        courierPickedUp: true,
+        deliveryStatus: "Courier picked up. En route to customer.",
+      };
+
+      await updateDoc(orderRef, updates);
+
+      // Update local state copy of the task
+      setCurrentTask((prev) =>
+        prev && prev.orderId === orderId ? { ...prev, ...updates } : prev
+      );
+
+      // If simulator is enabled, retarget from restaurant to user location
+      if (simulator.enabled && task.userLocation) {
+        const userLoc = coordinateFormat(task.userLocation);
+        if (
+          userLoc &&
+          typeof userLoc.latitude === "number" &&
+          typeof userLoc.longitude === "number"
+        ) {
+          const origin =
+            lastGPSRef.current &&
+            typeof lastGPSRef.current.latitude === "number" &&
+            typeof lastGPSRef.current.longitude === "number"
+              ? {
+                  latitude: lastGPSRef.current.latitude,
+                  longitude: lastGPSRef.current.longitude,
+                }
+              : SIM_ORIGIN;
+
+          lastGPSRef.current = { ...origin, timestamp: Date.now() };
+
+          // Keep courier doc in sync
+          updateCourierDoc({
+            location: origin,
+            movementFlag: "MOVING",
+            status: "active",
+          });
+
+          setSimulator((prev) => ({
+            ...prev,
+            running: true,
+            origin,
+            target: userLoc,
+          }));
+        }
+      }
     } catch (err) {
-      console.error("Error rejecting order:", err);
-      setError("Failed to reject order.");
+      console.error("Failed to mark order as picked up:", err);
+      setError("Failed to mark order as picked up.");
     }
-  };*/
+  };
 
   const formatItemsForMessage = (items) => {
     if (!Array.isArray(items) || items.length === 0) return "your order items";
 
-    const formattedItems = items.map(item => 
-      `${item.quantity}x ${item.name}`
-    ).join(", ");
-  
+    const formattedItems = items
+      .map((item) => `${item.quantity}x ${item.name}`)
+      .join(", ");
+
     return formattedItems;
   };
 
   const handleUserExchange = async (orderId) => {
     if (!orderId || !courierData?.id) return;
 
-    const task = currentTaskRef.current; 
+    const task = currentTaskRef.current;
     if (!task || task.orderId !== orderId) {
-        console.error("Task not found or mismatch for orderId:", orderId);
-        alert("Current task data is missing or mismatched.");
-        return;
+      console.error("Task not found or mismatch for orderId:", orderId);
+      alert("Current task data is missing or mismatched.");
+      return;
     }
 
-    if (!window.confirm("Confirm that the Grab N Go user's orderId matches your task orderId?")) {
-        return;
+    if (
+      !window.confirm(
+        "Confirm that the Grab N Go user's orderId matches your task orderId?"
+      )
+    ) {
+      return;
     }
 
     try {
-        const batch = writeBatch(db);
-        const orderRef = doc(db, "restaurants", task.restaurantId, "restaurantOrders", orderId);
-        const courierRef = doc(db, "couriers", courierData.id);
-        const userRef = collection(db, "users", task.userId, "messages");
-        const systemRef = doc(db, "systemFiles", "systemVariables");
-        
-        const paymentCourier = Number(task.paymentCourier) || 0; 
-        const paymentPlatform = Number(task.paymentPlatform) || 0;
+      const batch = writeBatch(db);
+      const orderRef = doc(
+        db,
+        "restaurants",
+        task.restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+      const courierRef = doc(db, "couriers", courierData.id);
+      const userRef = collection(db, "users", task.userId, "messages");
+      const systemRef = doc(db, "systemFiles", "systemVariables");
 
-        batch.update(orderRef, {
-          deliveryStatus: "Delivery complete.", //may not write
-          orderCompleted: true,
-          completedBy: courierData.id,
-          completedAt: Timestamp.fromDate(new Date()),
-        });
+      const paymentCourier = Number(task.paymentCourier) || 0;
+      const paymentPlatform = Number(task.paymentPlatform) || 0;
 
-        batch.update(courierRef, {
-            currentTask: "",
-            earnings: increment(paymentCourier),
-        });
+      batch.update(orderRef, {
+        deliveryStatus: "Delivery complete.",
+        orderCompleted: true,
+        completedBy: courierData.id,
+        completedAt: Timestamp.fromDate(new Date()),
+      });
 
-        // --- SEND Message to Customer (Conditional on userId) ---
-        await addDoc(userRef, { 
-          createdAt: Timestamp.fromDate(new Date()), 
-          message:
-            `Order ${orderId} from ${task.storeName} , containing ${formatItemsForMessage(task.items)}, has been delivered. 
-            Total paid: $${Number(task.payment).toFixed(2)}. Thank you for choosing Grab N Go.`,
-          read: false,
-          type: "order_status",
-          orderId: orderId,
-        });
-        
-        batch.update(systemRef, {
-            earnings: increment(paymentPlatform),
-        });
-      
-        await batch.commit();
+      batch.update(courierRef, {
+        currentTask: "",
+        earnings: increment(paymentCourier),
+      });
 
-        setCurrentTask(null);
-        setCourierData(prev => ({
-            ...prev,
-            earnings: (prev.earnings || 0) + paymentCourier,
-            currentTask: "",
-        }));
+      // --- SEND Message to Customer ---
+      await addDoc(userRef, {
+        createdAt: Timestamp.fromDate(new Date()),
+        message: `Order ${orderId} from ${
+          task.storeName
+        } , containing ${formatItemsForMessage(
+          task.items
+        )}, has been delivered. 
+            Total paid: $${Number(task.payment).toFixed(
+              2
+            )}. Thank you for choosing Grab N Go.`,
+        read: false,
+        type: "order_status",
+        orderId: orderId,
+      });
 
-        console.log(`Order ${orderId} successfully marked as complete and courier earnings updated.`);
+      batch.update(systemRef, {
+        earnings: increment(paymentPlatform),
+      });
+
+      await batch.commit();
+
+      setCurrentTask(null);
+      setCourierData((prev) => ({
+        ...prev,
+        earnings: (prev.earnings || 0) + paymentCourier,
+        currentTask: "",
+      }));
+
+      setSimulator(prev => ({
+        ...prev,
+        running: false,
+        target: null
+      }));
+
+lastGPSRef.current = null;
+
+      console.log(
+        `Order ${orderId} successfully marked as complete and courier earnings updated.`
+      );
     } catch (error) {
-        console.error("Error updating order status upon user delivery:", error);
-        alert("Failed to update order status. Check console for details.");
+      console.error("Error updating order status upon user delivery:", error);
+      alert("Failed to update order status. Check console for details.");
     }
+  };
+
+  // ---- UI Helpers ----
+  const renderStatusChip = () => {
+    const status = courierData?.status || "inactive";
+    const movement = courierData?.movementFlag || "IDLE";
+
+    let label = "Offline";
+    let bg = "bg-gray-100";
+    let text = "text-gray-700";
+    let dot = "bg-gray-400";
+
+    if (status === "active") {
+      if (movement === "MOVING" || movement === "NEAR_DESTINATION") {
+        label = "Active · On the move";
+        bg = "bg-green-50";
+        text = "text-green-800";
+        dot = "bg-green-500";
+      } else {
+        label = "Active · Idle";
+        bg = "bg-amber-50";
+        text = "text-amber-800";
+        dot = "bg-amber-500";
+      }
+    } else {
+      if (movement === "STOPPED_TOO_LONG") {
+        label = "Inactive · Stopped too long";
+        bg = "bg-red-50";
+        text = "text-red-800";
+        dot = "bg-red-500";
+      }
+    }
+
+    return (
+      <div
+        className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${bg} ${text}`}
+      >
+        <span className={`w-2 h-2 rounded-full ${dot}`} />
+        <span>{label}</span>
+      </div>
+    );
   };
 
   if (loadingAuth) return <div>Loading authentication...</div>;
@@ -541,186 +1121,488 @@ export default function CourierPage() {
 
   //COMPONENT UI
   return (
-  <div className="p-6">
-    <h1 className="text-2xl font-bold">
-      Welcome, {user.displayName || user.email} (Courier)
-    </h1>
+    <div className="p-6 max-w-6xl mx-auto">
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold">
+          Welcome, {user.displayName || user.email}{" "}
+          <span className="text-sm font-normal text-gray-500">
+            · Courier Dashboard
+          </span>
+        </h1>
 
-    {error && <p className="mt-4 text-red-600">{error}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-gray-700">
+          {courierData && renderStatusChip()}
 
-    {fetchingCourier ? (
-      <p className="mt-4">Checking your courier profile...</p>
-    ) : courierData ? (
-      <>
-        <table className="mt-6 w-full text-left border border-gray-300">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-2 border">Courier ID</th>
-              <th className="p-2 border">Name</th>
-              <th className="p-2 border">Email</th>
-              <th className="p-2 border">Earnings</th>
-              <th className="p-2 border">Location</th>
-              <th className="p-2 border">Movement Status</th>
-              <th className="p-2 border">GPS Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="p-2 border">{courierData.courierId}</td>
-              <td className="p-2 border">{courierData.name}</td>
-              <td className="p-2 border">{courierData.email}</td>
-              <td className="p-2 border">${courierData.earnings.toFixed(2)}</td>
-              <td className="p-2 border">
-                {courierData.location?.latitude.toFixed(8)},{" "}
-                {courierData.location?.longitude.toFixed(8)}
-              </td>
-              <td className="p-2 border">{courierData.movementFlag}</td>
-              <td className="p-2 border">{courierData.status}</td>
-            </tr>
-          </tbody>
-        </table>
-    <hr className="my-8 border-t-2 border-gray-300" />
+          {movementMeta.phase && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+              <span className="w-2 h-2 rounded-full bg-blue-400 mr-2" />
+              {movementMeta.phase}
+            </span>
+          )}
 
-    <h2 className="text-xl font-semibold">Current Task</h2>
-    {fetchingOrders ? (
-    <p>Loading tasks…</p>
-      ) : currentTask ? (
+          {movementMeta.etaMinutes && currentTask && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">
+              ETA to customer: ~{movementMeta.etaMinutes} min
+            </span>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-xs text-gray-500">
+            <span>
+              Last GPS update:{" "}
+              {movementMeta.lastUpdate
+                ? new Date(movementMeta.lastUpdate).toLocaleTimeString()
+                : "—"}
+            </span>
+            {movementMeta.speedKmh != null && (
+              <span>
+                · Approx. speed:{" "}
+                <span className="font-medium">
+                  {movementMeta.speedKmh} km/h
+                </span>
+              </span>
+            )}
+            {movementMeta.gpsAccuracy != null && (
+              <span>· GPS ±{Math.round(movementMeta.gpsAccuracy)} m</span>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {error && (
+        <p className="mb-4 text-sm bg-red-50 text-red-700 border border-red-100 px-3 py-2 rounded">
+          {error}
+        </p>
+      )}
+
+      {fetchingCourier ? (
+        <p className="mt-4">Checking your courier profile...</p>
+      ) : courierData ? (
+        <>
+          {/* Simulator panel (dev only) */}
+          <section className="mb-6 border rounded-lg bg-slate-50/60 p-4 text-xs text-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-800">
+                  Simulator (dev)
+                </h2>
+                <p className="text-[11px] text-gray-500">
+                  Simulates GPS from 44.356118, -79.627597 towards the current
+                  task&apos;s restaurant. Turn off when using a real device.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-[11px]">
+                <span>Enable</span>
+                <input
+                  type="checkbox"
+                  checked={simulator.enabled}
+                  onChange={(e) =>
+                    setSimulator((prev) => ({
+                      ...prev,
+                      enabled: e.target.checked,
+                      running: e.target.checked ? prev.running : false,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 mt-2">
+              <div className="flex items-center gap-2">
+                <span>Speed</span>
+                <input
+                  type="number"
+                  min={5}
+                  max={80}
+                  value={simulator.speedKmh}
+                  onChange={(e) =>
+                    setSimulator((prev) => ({
+                      ...prev,
+                      speedKmh: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="w-16 border rounded px-1 py-0.5 text-xs"
+                />
+                <span>km/h</span>
+              </div>
+
+              <button
+                type="button"
+                className="px-3 py-1 rounded bg-sky-600 text-white text-xs font-medium hover:bg-sky-700 disabled:opacity-40"
+                disabled={!simulator.enabled || !currentTask}
+                onClick={() => {
+                  if (!currentTask) return;
+                  const targetLoc = currentTask.restaurantLocation
+                    ? coordinateFormat(currentTask.restaurantLocation)
+                    : null;
+                  if (
+                    !targetLoc ||
+                    typeof targetLoc.latitude !== "number" ||
+                    typeof targetLoc.longitude !== "number"
+                  ) {
+                    alert(
+                      "Current task does not have a valid restaurantLocation to simulate."
+                    );
+                    return;
+                  }
+                  const origin = SIM_ORIGIN;
+                  lastGPSRef.current = { ...origin, timestamp: Date.now() };
+                  updateCourierDoc({
+                    location: origin,
+                    movementFlag: "MOVING",
+                    status: "active",
+                  });
+                  setSimulator((prev) => ({
+                    ...prev,
+                    running: true,
+                    origin,
+                    target: targetLoc,
+                  }));
+                }}
+              >
+                Start sim to restaurant
+              </button>
+
+              {simulator.running && (
+                <button
+                  type="button"
+                  className="px-3 py-1 rounded bg-gray-200 text-gray-700 text-xs font-medium hover:bg-gray-300"
+                  onClick={() =>
+                    setSimulator((prev) => ({ ...prev, running: false }))
+                  }
+                >
+                  Stop sim
+                </button>
+              )}
+
+              <span className="text-[11px] text-gray-500">
+                Status:{" "}
+                {simulator.enabled
+                  ? simulator.running
+                    ? "Running"
+                    : "Idle"
+                  : "Disabled"}
+              </span>
+            </div>
+          </section>
+
+          {/* Courier Info + Stats */}
+          <section className="mb-8 grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg bg-white shadow-sm">
+              <div className="px-4 py-3 border-b bg-gray-50 rounded-t-lg">
+                <h2 className="text-sm font-semibold text-gray-800">
+                  Courier Profile
+                </h2>
+              </div>
+              <div className="p-4 text-sm text-gray-700">
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <span className="font-medium text-gray-600">
+                      Courier ID:
+                    </span>{" "}
+                    <span className="font-mono">
+                      {courierData.courierId || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-600">Name:</span>{" "}
+                    {courierData.name || "—"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-600">Email:</span>{" "}
+                    {courierData.email || "—"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-600">
+                      Earnings:
+                    </span>{" "}
+                    <span className="font-semibold text-emerald-700">
+                      $
+                      {(courierData.earnings ?? 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg bg-white shadow-sm">
+              <div className="px-4 py-3 border-b bg-gray-50 rounded-t-lg">
+                <h2 className="text-sm font-semibold text-gray-800">
+                  Live Location Snapshot
+                </h2>
+              </div>
+              <div className="p-4 text-sm text-gray-700 space-y-1">
+                <div>
+                  <span className="font-medium text-gray-600">Coords:</span>{" "}
+                  {courierData.location ? (
+                    <>
+                      {courierData.location.latitude.toFixed(6)},{" "}
+                      {courierData.location.longitude.toFixed(6)}
+                    </>
+                  ) : (
+                    "Not available"
+                  )}
+                </div>
+                <div>
+                  <span className="font-medium text-gray-600">
+                    Movement flag:
+                  </span>{" "}
+                  {courierData.movementFlag || "—"}
+                </div>
+                <div>
+                  <span className="font-medium text-gray-600">
+                    GPS status:
+                  </span>{" "}
+                  {courierData.status || "—"}
+                </div>
+                {movementMeta.distToRestaurantKm != null && currentTask && (
+                  <div>
+                    <span className="font-medium text-gray-600">
+                      Dist. to restaurant:
+                    </span>{" "}
+                    {movementMeta.distToRestaurantKm.toFixed(2)} km
+                  </div>
+                )}
+                {movementMeta.distToUserKm != null && currentTask && (
+                  <div>
+                    <span className="font-medium text-gray-600">
+                      Dist. to customer:
+                    </span>{" "}
+                    {movementMeta.distToUserKm.toFixed(2)} km
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Current Task */}
           <section className="mb-8">
-              <h2 className="text-xl font-semibold mb-3">Current Delivery</h2>
-              <div className="p-4 border rounded shadow-md bg-white">
-                  
+            <h2 className="text-xl font-semibold mb-3">Current Task</h2>
+            {fetchingOrders ? (
+              <p>Loading tasks…</p>
+            ) : currentTask ? (
+              <section className="mb-8">
+                <div className="p-4 border rounded shadow-md bg-white">
+                  {/* Task phase & ETA chips */}
+                  <div className="flex flex-wrap items-center gap-3 mb-3 text-xs">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 font-medium">
+                      <span className="w-2 h-2 rounded-full bg-slate-400 mr-2" />
+                      Task Phase: {movementMeta.phase || "In progress"}
+                    </span>
+                    {movementMeta.etaMinutes && (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+                        ETA: ~{movementMeta.etaMinutes} min
+                      </span>
+                    )}
+                  </div>
+
                   {/* Table for Key Metrics */}
                   <table className="w-full text-sm mb-3">
-                      <thead className="border-b bg-gray-50">
-                          <tr>
-                            <th className="py-2 px-2 text-left">Order ID</th>
-                            <th className="py-2 px-2 text-left">Payout</th>
-                            <th className="py-2 px-2 text-left">Restaurant Distance: <span className="font-normal">{currentTask.restaurantAddress}</span></th>
-                            <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{currentTask.userAddress}</span></th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          <tr>
-                              <td className="py-1 px-2 font-semibold">{currentTask.orderId}</td>
-                              <td className="py-1 px-2 font-semibold text-green-600">
-                                  ${currentTask.paymentCourier.toFixed(2)}
-                              </td>
-                              <td className="py-1 px-2">{currentTask.courier_R_Distance}km</td>
-                              <td className="py-1 px-2">{currentTask.courierPickedUp
-                                ? currentTask.courier_U_Distance
-                                : currentTask.total_Distance}km</td>
-                          </tr>
-                      </tbody>
+                    <thead className="border-b bg-gray-50">
+                      <tr>
+                        <th className="py-2 px-2 text-left">Order ID</th>
+                        <th className="py-2 px-2 text-left">Payout</th>
+                        <th className="py-2 px-2 text-left">
+                          Restaurant Distance:{" "}
+                          <span className="font-normal">
+                            {currentTask.restaurantAddress}
+                          </span>
+                        </th>
+                        <th className="py-2 px-2 text-left">
+                          Total Trip:{" "}
+                          <span className="font-normal">
+                            {currentTask.userAddress}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="py-1 px-2 font-semibold">
+                          {currentTask.orderId}
+                        </td>
+                        <td className="py-1 px-2 font-semibold text-green-600">
+                          $
+                          {Number(
+                            currentTask.paymentCourier ?? 0
+                          ).toFixed(2)}
+                        </td>
+                        <td className="py-1 px-2">
+                          {currentTask.courier_R_Distance}km
+                        </td>
+                        <td className="py-1 px-2">
+                          {currentTask.courierPickedUp
+                            ? currentTask.courier_U_Distance
+                            : currentTask.total_Distance}
+                          km
+                        </td>
+                      </tr>
+                    </tbody>
                   </table>
+
                   {/* Items List */}
-                  <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
+                  <strong className="block text-sm mb-1 text-gray-900">
+                    Items:
+                  </strong>
                   <ul className="ml-4 list-disc text-xs space-y-0.5">
-                      {currentTask.items?.map((item, i) => (
-                          <li key={i}>
-                              {item.name} × {item.quantity}
-                          </li>
-                      ))}
-                  </ul>
-                  
-                  {/* Action Button */}
-                  {currentTask.courierPickedUp && (
-                      <button
-                          onClick={() => handleUserExchange(currentTask.orderId)}
-                          className="mt-4 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
-                      >
-                          Confirm Delivery
-                      </button>
-                  )}
-              </div>
-          </section>
-      ) : (
-          <p>No current tasks.</p> 
-      )}
-
-    {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
-    {!currentTask && (
-    <>
-      <hr className="my-8 border-t-2 border-gray-300" />
-      <h2 className="text-xl font-semibold mb-4">Available Tasks</h2>
-      {fetchingOrders ? (
-        <p>Loading tasks…</p>
-      ) : orders.length === 0 ? (
-        <p>No tasks available.</p>
-      ) : (
-        <ul className="list-none space-y-4 text-gray-700"> 
-        {orders.sort((a, b) => {
-        // 1. Order by earliest prep time
-        const timeComparison = a.estimatedPreppedTime - b.estimatedPreppedTime;
-
-        if (timeComparison !== 0) {
-            return timeComparison;
-        }
-        // 2. Order by shortest total_Distance first
-        return a.total_Distance - b.total_Distance;
-      }).map((order, idx) => (
-            <li key={idx} className="p-4 border rounded shadow-md bg-white">
-              
-              <table className="w-full text-sm mb-3">
-                <thead className="border-b bg-gray-50">
-                  <tr>
-                    <th className="py-2 px-2 text-left">Order ID</th>
-                    <th className="py-2 px-2 text-left">Payout</th>
-                    <th className="py-2 px-2 text-left">Ready At</th>
-                    <th className="py-2 px-2 text-left">Restaurant Distance: <span className="font-normal">{order.restaurantAddress}</span></th>
-                    <th className="py-2 px-2 text-left">Total Trip: <span className="font-normal">{order.userAddress}</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="py-1 px-2 font-semibold">{order.orderId}</td>
-                    <td className="py-1 px-2 font-semibold">
-                      ${Number(order.paymentCourier).toFixed(2)}
-                    </td>
-                    <td className={`text-sm 
-                    ${isOnTime(CURRENT_TIME_MS, order.estimatedPreppedTime)
-                      ? "text-green-600"
-                      : "text-red-600"}`}>  
-                    {formatOrderTimestamp(order.estimatedPreppedTime)}</td>
-                    <td className="py-1 px-2">{order.courier_R_Distance}km</td>
-                    <td className="py-1 px-2">{order.total_Distance}km</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Items List */}
-              <strong className="block text-sm mb-1 text-gray-900">Items:</strong>
-              <ul className="ml-4 list-disc text-xs space-y-0.5">
-                  {order.items.map((item, i) => (
+                    {currentTask.items?.map((item, i) => (
                       <li key={i}>
-                          {item.name} × {item.quantity}
+                        {item.name} × {item.quantity}
                       </li>
-                  ))}
-              </ul>
-              
-              {/* Action Button */}
-              <div className="mt-4">
-                  <button
-                      className="bg-green-600 text-white px-4 py-2 rounded-md shadow hover:bg-green-700 transition"
-                      onClick={() => handleAccept(order)}
-                  >
-                      Accept Task
-                  </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      </>
-      )}
-      </>
-    ) : null}
-  </div>
-);
+                    ))}
+                  </ul>
+
+                  {/* Action Button */}
+                                    {/* Action Buttons */}
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    {!currentTask.courierPickedUp && (
+                      <button
+                        onClick={() => handlePickupOrder(currentTask.orderId)}
+                        className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-md shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition duration-150 ease-in-out"
+                      >
+                        Mark as Picked Up
+                      </button>
+                    )}
+
+                    {currentTask.courierPickedUp && (
+                      <button
+                        onClick={() => handleUserExchange(currentTask.orderId)}
+                        className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out"
+                      >
+                        Confirm Delivery
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <p>No current tasks.</p>
+            )}
+          </section>
+
+          {/* CONDITIONAL RENDERING: Only show Task List if there is NO currentTask */}
+          {!currentTask && (
+            <>
+              <hr className="my-8 border-t-2 border-gray-300" />
+              <h2 className="text-xl font-semibold mb-4">Available Tasks</h2>
+              {fetchingOrders ? (
+                <p>Loading tasks…</p>
+              ) : orders.length === 0 ? (
+                <p>No tasks available.</p>
+              ) : (
+                <ul className="list-none space-y-4 text-gray-700">
+                  {orders
+                    .slice()
+                    .sort((a, b) => {
+                      // 1. Order by earliest prep time
+                      const timeA = a.estimatedPreppedTime?.seconds || 0;
+                      const timeB = b.estimatedPreppedTime?.seconds || 0;
+                      const timeComparison = timeA - timeB;
+                      if (timeComparison !== 0) return timeComparison;
+
+                      // 2. Order by shortest total_Distance first
+                      return (a.total_Distance || 0) - (b.total_Distance || 0);
+                    })
+                    .map((order, idx) => (
+                      <li
+                        key={`${order.restaurantId}__${order.orderId}__${idx}`}
+                        className="p-4 border rounded shadow-md bg-white"
+                      >
+                        <table className="w-full text-sm mb-3">
+                          <thead className="border-b bg-gray-50">
+                            <tr>
+                              <th className="py-2 px-2 text-left">Order ID</th>
+                              <th className="py-2 px-2 text-left">Payout</th>
+                              <th className="py-2 px-2 text-left">
+                                Ready At
+                              </th>
+                              <th className="py-2 px-2 text-left">
+                                Restaurant Distance:{" "}
+                                <span className="font-normal">
+                                  {order.restaurantAddress}
+                                </span>
+                              </th>
+                              <th className="py-2 px-2 text-left">
+                                Total Trip:{" "}
+                                <span className="font-normal">
+                                  {order.userAddress}
+                                </span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="py-1 px-2 font-semibold">
+                                {order.orderId}
+                              </td>
+                              <td className="py-1 px-2 font-semibold">
+                                $
+                                {Number(
+                                  order.paymentCourier ?? 0
+                                ).toFixed(2)}
+                              </td>
+                              <td
+                                className={`text-sm ${
+                                  isOnTime(
+                                    CURRENT_TIME_MS,
+                                    order.estimatedPreppedTime
+                                  )
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }`}
+                              >
+                                {formatOrderTimestamp(
+                                  order.estimatedPreppedTime
+                                )}
+                              </td>
+                              <td className="py-1 px-2">
+                                {order.courier_R_Distance}km
+                              </td>
+                              <td className="py-1 px-2">
+                                {order.total_Distance}km
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+
+                        {/* Items List */}
+                        <strong className="block text-sm mb-1 text-gray-900">
+                          Items:
+                        </strong>
+                        <ul className="ml-4 list-disc text-xs space-y-0.5">
+                          {order.items?.map((item, i) => (
+                            <li key={i}>
+                              {item.name} × {item.quantity}
+                            </li>
+                          ))}
+                        </ul>
+
+                        {/* Action Button */}
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                          <button
+                            className="bg-green-600 text-white px-4 py-2 rounded-md shadow hover:bg-green-700 transition text-sm font-medium"
+                            onClick={() => handleAccept(order)}
+                          >
+                            Accept Task
+                          </button>
+                          <span className="text-xs text-gray-500">
+                            Restaurant: {order.storeName || order.restaurantId}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 /*
 TODO
-* Later: courier must be within a certain distance to accept a task
+* Later: courier must be within a certain distance to accept a task (currently 10km; can tighten to 3km)
 * Later: Better UI -> top right nav is CourierPage user profile link (Name, email, phone* Please complete your user profile before continuing)
                       Job disclosure form: standard procedures/rules - gps tracking; click deliveryStatus buttons; 
                       obligation to select movementFlag updates if waiting; add phoneNumber field
