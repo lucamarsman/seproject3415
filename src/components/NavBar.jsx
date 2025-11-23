@@ -4,15 +4,20 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import Logo from "../components/Logo";
 import "../index.css";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
-export default function NavBar({ onSelectRole }) {
+export default function NavBar({ onSelectRole, isSidebarOpen, onToggleSidebar }) {
   const [user, setUser] = useState(null);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [acctMenuOpen, setAcctMenuOpen] = useState(false);
+  const [profileImg, setProfileImg] = useState(null);
   const [selectedRole, setSelectedRole] = useState(() => localStorage.getItem("selectedRole"));
   const roleMenuRef = useRef(null);
   const acctMenuRef = useRef(null);
   const navigate = useNavigate();
+
+  const isUserPage = window.location.pathname.startsWith("/user");
 
   const roles = [
     { label: "User", value: "user" },
@@ -25,8 +30,36 @@ export default function NavBar({ onSelectRole }) {
     return () => unsub();
   }, []);
 
+  // Fetch Firestore profileImg
   useEffect(() => {
-    // Close menus on outside click or Escape key
+    const fetchProfile = async () => {
+      if (!user) {
+        setProfileImg(null);
+        return;
+      }
+
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+
+        if (snap.exists()) {
+          const data = snap.data();
+          setProfileImg(data.profileImg || null);
+        } else {
+          setProfileImg(null);
+        }
+      } catch (err) {
+        console.error("Error loading profile image:", err);
+        setProfileImg(null);
+      }
+    };
+
+    fetchProfile();
+  }, [user]);
+
+  const photoURL = profileImg;
+
+  useEffect(() => {
     function onDocClick(e) {
       if (roleMenuRef.current && !roleMenuRef.current.contains(e.target)) {
         setRoleMenuOpen(false);
@@ -52,7 +85,6 @@ export default function NavBar({ onSelectRole }) {
   }, []);
 
   useEffect(() => {
-    // When user signs in, update selected role from localStorage
     const role = localStorage.getItem("selectedRole");
     if (role) setSelectedRole(role);
   }, [user]);
@@ -79,15 +111,29 @@ export default function NavBar({ onSelectRole }) {
   const initials = (() => {
     if (!user) return "";
     const n = user.displayName || user.email || "";
-    const parts = n.split("@")[0].split(/[.\s_-]/).filter(Boolean);
+    const parts = n
+      .split("@")[0]
+      .split(/[.\s_-]/)
+      .filter(Boolean);
     return (parts[0]?.[0] || "U").toUpperCase();
   })();
 
   return (
     <header className="app-header" role="banner">
       <div className="header-inner">
-        {/* Left: Logo */}
-        <div className="header-left">
+        <div className="header-left flex items-center gap-2">
+          {isUserPage && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 bg-white shadow-sm cursor-pointer"
+              aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+              aria-expanded={isSidebarOpen}
+            >
+              {isSidebarOpen ? "✕" : "☰"}
+            </button>
+          )}
+
           <Link to="/" className="logo-link" aria-label="Go to Home">
             <Logo width={120} />
           </Link>
@@ -103,29 +149,41 @@ export default function NavBar({ onSelectRole }) {
                 aria-expanded={acctMenuOpen}
                 onClick={() => setAcctMenuOpen((v) => !v)}
               >
-                <span className="avatar" aria-hidden="true">{initials}</span>
+                {photoURL ? (
+                  <img
+                    src={photoURL}
+                    alt="Profile"
+                    className="w-7 h-7 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="avatar" aria-hidden="true">
+                    {initials}
+                  </span>
+                )}
                 <span className="account-name">
                   {user.displayName || user.email}
                 </span>
-                <span className="caret" aria-hidden="true">▾</span>
+                <span className="caret" aria-hidden="true">
+                  ▾
+                </span>
               </button>
 
               {acctMenuOpen && (
                 <ul className="menu" role="menu">
-                  {/* Role-Based Menu Rendering */}
                   {selectedRole === "user" && (
-                    <>
-                      <li role="menuitem">
-                        <Link to="/user" onClick={() => setAcctMenuOpen(false)}>
-                          User Profile
-                        </Link>
-                      </li>
-                    </>
+                    <li role="menuitem">
+                      <Link to="/user" onClick={() => setAcctMenuOpen(false)}>
+                        User Profile
+                      </Link>
+                    </li>
                   )}
 
                   {selectedRole === "restaurant" && (
                     <li role="menuitem">
-                      <Link to="/restaurant" onClick={() => setAcctMenuOpen(false)}>
+                      <Link
+                        to="/restaurant"
+                        onClick={() => setAcctMenuOpen(false)}
+                      >
                         Manager Profile
                       </Link>
                     </li>
@@ -133,7 +191,10 @@ export default function NavBar({ onSelectRole }) {
 
                   {selectedRole === "courier" && (
                     <li role="menuitem">
-                      <Link to="/courier" onClick={() => setAcctMenuOpen(false)}>
+                      <Link
+                        to="/courier"
+                        onClick={() => setAcctMenuOpen(false)}
+                      >
                         Courier Profile
                       </Link>
                     </li>
@@ -169,7 +230,9 @@ export default function NavBar({ onSelectRole }) {
                   ))}
                 </ul>
               )}
-              <Link to="/login" className="ghost-btn">Sign up</Link>
+              <Link to="/login" className="ghost-btn">
+                Sign up
+              </Link>
             </div>
           )}
         </div>

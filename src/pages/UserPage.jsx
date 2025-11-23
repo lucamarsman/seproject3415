@@ -34,11 +34,11 @@ import HomeTabSkeleton from "../components/HomeTabSkeleton.jsx";
 import OrdersTabSkeleton from "../components/OrderTabSkeleton.jsx";
 import MessagesTabSkeleton from "../components/MessagesTabSkeleton";
 import SettingsTabSkeleton from "../components/SettingsTabSkeleton";
-
+import FilterBar from "../components/UserPage/filterBar.jsx";
 
 import { dummyRestaurants } from "../assets/dummyRestaurants.js";
 
-export default function UserPage() {
+export default function UserPage({ isSidebarOpen }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState(null);
@@ -393,7 +393,7 @@ export default function UserPage() {
     setProfileImgInput(userData.profileImg || "");
   }, [activeTab, userData, user]);
 
-  // Reset scroll when switching tabs or applying filters/search
+  // Reset scroll when switching tabs
   useEffect(() => {
     const container = document.getElementById("scrollable-panel");
     if (container) {
@@ -401,7 +401,7 @@ export default function UserPage() {
     } else {
       window.scrollTo({ top: 0, behavior: "auto" });
     }
-  }, [activeTab, filters.openNow, filters.sort, searchTerm, filters.types]);
+  }, [activeTab]);
 
   // Use effect for tracking tab loading state
   useEffect(() => {
@@ -578,9 +578,21 @@ export default function UserPage() {
         filters={filters}
         toggleType={toggleType}
         clearTypes={clearTypes}
+        isSidebarOpen={isSidebarOpen}
       />
 
-      <main className="flex-1 p-6 overflow-y-auto">
+      <main className="flex-1 p-6">
+        {activeTab === "home" && (
+        <FilterBar
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          filters={filters}
+          setFilters={setFilters}
+          toggleType={toggleType}
+          clearTypes={clearTypes}
+          resultCount={filteredRestaurants.length}
+        />
+      )}
   {tabLoading ? (
     <>
       {activeTab === "home" && <HomeTabSkeleton />}

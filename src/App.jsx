@@ -3,7 +3,6 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
-  Navigate,
 } from "react-router-dom";
 
 import Navbar from "./components/NavBar";
@@ -18,32 +17,45 @@ import OrderPage from "./pages/OrderPage";
 import BrowseRestaurants from "./pages/BrowseRestaurants";
 import MenuPage from "./pages/MenuPage";
 
-import 'leaflet/dist/leaflet.css';
+import "leaflet/dist/leaflet.css";
 
 function App() {
-  const [role, setRole] = useState(() => localStorage.getItem("selectedRole") || null);
+  const [role, setRole] = useState(
+    () => localStorage.getItem("selectedRole") || null
+  );
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
     <Router>
       <div className="flex flex-col min-h-screen">
-        <Navbar onSelectRole={setRole} />
-          <div className="page-container">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/login" element={<Login role={role} />} />
-              <Route path="/user" element={<UserPage />} />
-              <Route path="/restaurant" element={<RestaurantPage />} />
-              <Route path="/courier" element={<CourierPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/user/:restaurantName/:restaurantId/order" element={<OrderPage />} />
-              <Route path="/browseRestaurants" element={<BrowseRestaurants />} />
-              <Route path="/browseRestaurants/:id/menu" element={<MenuPage />} />
-            </Routes>
-          </div>
-          <Footer />
+        <Navbar
+          onSelectRole={setRole}
+          isSidebarOpen={isSidebarOpen}
+          onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+        />
+
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login role={role} />} />
+          <Route
+            path="/user"
+            element={<UserPage isSidebarOpen={isSidebarOpen} />}
+          />
+          <Route path="/restaurant" element={<RestaurantPage />} />
+          <Route path="/courier" element={<CourierPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="/user/:restaurantName/:restaurantId/order"
+            element={<OrderPage />}
+          />
+          <Route path="/browseRestaurants" element={<BrowseRestaurants />} />
+          <Route path="/browseRestaurants/:id/menu" element={<MenuPage />} />
+        </Routes>
+
+        <Footer />
       </div>
     </Router>
-    
   );
 }
 
