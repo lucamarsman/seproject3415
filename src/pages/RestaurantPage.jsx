@@ -31,6 +31,13 @@ import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
 import MenuTab from "../components/RestaurantPage/menuTab";
 import SettingsTab from "../components/RestaurantPage/settingsTab";
 
+import RestaurantPageSkeleton from "../components/RestaurantPageSkeleton.jsx";
+import InfoTabSkeleton from "../components/InfoTabSkeleton.jsx";
+import MenuTabSkeleton from "../components/MenuTabSkeleton.jsx";
+import OrdersTabSkeleton from "../components/OrdersTabSkeleton.jsx";
+import OrderHistoryTabSkeleton from "../components/OrderHistoryTabSkeleton.jsx";
+import RestaurantSettingsTabSkeleton from "../components/RestaurantSettingsTabSkeleton.jsx";
+
 function parseHoursArray(hoursArray) {
   const result = {};
   hoursArray.forEach((dayObj) => {
@@ -54,6 +61,7 @@ export default function RestaurantPage() {
   const [fetchingRestaurant, setFetchingRestaurant] = useState(true);
   const [error, setError] = useState("");
   const [hoursState, setHoursState] = useState({});
+  const [tabLoading, setTabLoading] = useState(false);
 
   // For orders
   const [orders, setOrders] = useState([]);
@@ -75,6 +83,17 @@ export default function RestaurantPage() {
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (loadingAuth || fetchingRestaurant) return;
+
+    setTabLoading(true);
+    const id = setTimeout(() => {
+      setTabLoading(false);
+    }, 600);
+
+    return () => clearTimeout(id);
+  }, [activeTab, loadingAuth, fetchingRestaurant]);
 
   useEffect(() => {
     const fetchCuisineTypes = async () => {
@@ -136,7 +155,7 @@ export default function RestaurantPage() {
             autoSetting: data.autoSetting ?? "manual",
             serviceRange: data.serviceRange ?? 50,
           });
-          setFetchingRestaurant(false);
+          setTimeout(() => setFetchingRestaurant(false), 600);
           return;
         }
 
@@ -201,53 +220,71 @@ export default function RestaurantPage() {
     console.log(currentTime);
 
     const oldOrdersToArchive = ordersToProcess.filter((order) => {
-        // --- Case A: orderCompleted = true and 1+ hours old (Courier delivered) ---
-        const isOldCompleted = 
-            order.orderCompleted === true && 
-            order.completedAt?.toDate?.() &&
-            (currentTime - order.completedAt.toDate().getTime()) > ONE_HOUR_MS;
+      // --- Case A: orderCompleted = true and 1+ hours old (Courier delivered) ---
+      const isOldCompleted =
+        order.orderCompleted === true &&
+        order.completedAt?.toDate?.() &&
+        currentTime - order.completedAt.toDate().getTime() > ONE_HOUR_MS;
 
-        // --- Case B: orderConfirmed = false and 1+ hours old (Rejected by restaurant/timeout) ---
-        const isOldRejected = 
-            order.orderConfirmed === false && 
-            order.createdAt?.toDate?.() &&
-            (currentTime - order.createdAt.toDate().getTime()) > ONE_HOUR_MS;
-            
-        // Return true if either case is met
-        return isOldCompleted || isOldRejected;
+      // --- Case B: orderConfirmed = false and 1+ hours old (Rejected by restaurant/timeout) ---
+      const isOldRejected =
+        order.orderConfirmed === false &&
+        order.createdAt?.toDate?.() &&
+        currentTime - order.createdAt.toDate().getTime() > ONE_HOUR_MS;
+
+      // Return true if either case is met
+      return isOldCompleted || isOldRejected;
     });
 
     if (oldOrdersToArchive.length === 0) {
-        console.log("No old orders to archive.");
-        return;
+      console.log("No old orders to archive.");
+      return;
     }
     const batch = writeBatch(db);
     const archivedOrderIds = [];
 
     for (const order of oldOrdersToArchive) {
-        const orderId = order.orderId;
-        // 1. Define Document References
-        const originalOrderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
-        const historyOrderRef = doc(db, "restaurants", restaurantId, "orderHistory", orderId);
-        
-        // 2. Prepare Data for History
-        const historyData = {
-            ...order,
-            archivedAt: serverTimestamp(),
-        };
+      const orderId = order.orderId;
+      // 1. Define Document References
+      const originalOrderRef = doc(
+        db,
+        "restaurants",
+        restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+      const historyOrderRef = doc(
+        db,
+        "restaurants",
+        restaurantId,
+        "orderHistory",
+        orderId
+      );
 
-        // A. Copy: Use batch.set to create the document in history with the same ID
-        batch.set(historyOrderRef, historyData);
-        batch.delete(originalOrderRef);
-        archivedOrderIds.push(orderId);
+      // 2. Prepare Data for History
+      const historyData = {
+        ...order,
+        archivedAt: serverTimestamp(),
+      };
+
+      // A. Copy: Use batch.set to create the document in history with the same ID
+      batch.set(historyOrderRef, historyData);
+      batch.delete(originalOrderRef);
+      archivedOrderIds.push(orderId);
     }
-    
+
     try {
-        await batch.commit();         
-        setOrders(prev => prev.filter(o => !archivedOrderIds.includes(o.orderId)));
-        console.log(`✅ Successfully archived and deleted old orders: ${archivedOrderIds.join(', ')}`);
+      await batch.commit();
+      setOrders((prev) =>
+        prev.filter((o) => !archivedOrderIds.includes(o.orderId))
+      );
+      console.log(
+        `✅ Successfully archived and deleted old orders: ${archivedOrderIds.join(
+          ", "
+        )}`
+      );
     } catch (error) {
-        console.error("Batch archiving of old orders failed:", error);
+      console.error("Batch archiving of old orders failed:", error);
     }
   };
 
@@ -263,7 +300,6 @@ export default function RestaurantPage() {
     let firstLoad = true;
 
     const processOrders = async (ordersArray) => {
-      
       // 0. ARCHIVE ALL OLD COMPLETED ORDERS
       /*
       if (restaurantData?.id) {
@@ -371,7 +407,8 @@ export default function RestaurantPage() {
             courier_U_Distance: updates.R_U_distanceKm || NaN,
             deliveryStatus: newDeliveryStatus,
             estimatedPickUpTime: updates.estimatedPickUpTimeTimestamp || null,
-            estimatedDeliveryTime: updates.estimatedDeliveryTimeTimestamp || null,
+            estimatedDeliveryTime:
+              updates.estimatedDeliveryTimeTimestamp || null,
             total_Distance: updates.total_Distance || NaN,
           });
 
@@ -470,7 +507,6 @@ export default function RestaurantPage() {
         if (firstLoad) setLoadingOrders(false);
       }
     );
-    
 
     // 2. INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
     const interval = setInterval(() => {
@@ -497,7 +533,7 @@ export default function RestaurantPage() {
       );
 
       // GET ORDER DATA
-      let orderData = orders.find(o => o.orderId === orderId); 
+      let orderData = orders.find((o) => o.orderId === orderId);
       if (!orderData) {
         const orderSnap = await getDoc(orderDocRef);
         if (!orderSnap.exists()) {
@@ -507,16 +543,16 @@ export default function RestaurantPage() {
         }
         orderData = orderSnap.data();
       }
-      
+
       const totalPrepTime = orderData.totalPrepTime || 0;
-      
+
       // UPDATE RESTAURANT DATA
       const restaurantRef = doc(db, "restaurants", restaurantData.id);
-      const paymentRestaurant = orderData.paymentRestaurant || 0; 
+      const paymentRestaurant = orderData.paymentRestaurant || 0;
       await updateDoc(restaurantRef, {
         earnings: increment(paymentRestaurant),
       });
-      
+
       const currentTime = new Date();
       const confirmedTime = Timestamp.fromDate(currentTime);
       const estimatedTimeDate = new Date(currentTime.getTime());
@@ -650,7 +686,7 @@ export default function RestaurantPage() {
   }, [orders, restaurantData, settings]);
 
   // Rendering
-  if (loadingAuth || fetchingRestaurant) return <div>Loading...</div>;
+  if (loadingAuth || fetchingRestaurant) return <RestaurantPageSkeleton />;
   if (!user) return <Navigate to="/login" />;
   if (error)
     return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
@@ -683,75 +719,89 @@ export default function RestaurantPage() {
           Restaurant Manager Dashboard
         </h1>
         <h2 className="text-2xl font-bold mb-6">
-          Welcome, {user.displayName || user.email} (Restaurant Manager) of {restaurantData.storeName}
+          Welcome, {user.displayName || user.email} (Restaurant Manager) of{" "}
+          {restaurantData.storeName}
         </h2>
 
-        {/* 1. Restaurant Info Tab (activeTab === "info") */}
-        {activeTab === "info" && (
-          <InfoTab
-            restaurantData={restaurantData}
-            setRestaurantData={setRestaurantData}
-            cuisineTypes={cuisineTypes}
-            loadingTypes={loadingTypes}
-            db={db}
-            geocodeAddress={geocodeAddress}
-            formatHoursForFirestore={formatHoursForFirestore}
-            parseHoursArray={parseHoursArray}
-          />
-        )}
+        {tabLoading ? (
+          <>
+            {activeTab === "info" && <InfoTabSkeleton />}
+            {activeTab === "menu" && <MenuTabSkeleton />}
+            {activeTab === "orders" && <OrdersTabSkeleton />}
+            {activeTab === "orderHistory" && <OrderHistoryTabSkeleton />}
+            {activeTab === "settings" && <RestaurantSettingsTabSkeleton />}
+          </>
+        ) : (
+          <>
+            {activeTab === "info" && (
+              <InfoTab
+                restaurantData={restaurantData}
+                setRestaurantData={setRestaurantData}
+                cuisineTypes={cuisineTypes}
+                loadingTypes={loadingTypes}
+                db={db}
+                geocodeAddress={geocodeAddress}
+                formatHoursForFirestore={formatHoursForFirestore}
+                parseHoursArray={parseHoursArray}
+              />
+            )}
 
-        {/* 2. Menu Management Tab (activeTab === "menu") */}
-        {activeTab === "menu" && (
-          <MenuTab
-            restaurantData={restaurantData}
-            setRestaurantData={setRestaurantData}
-            db={db}
-            doc={doc}
-            updateDoc={updateDoc}
-          />
-        )}
+            {activeTab === "menu" && (
+              <MenuTab
+                restaurantData={restaurantData}
+                setRestaurantData={setRestaurantData}
+                db={db}
+                doc={doc}
+                updateDoc={updateDoc}
+              />
+            )}
 
-        {/* 3. Order Management Tab (activeTab === "orders") */}
-        {activeTab === "orders" && (
-          <OrdersTab
-            restaurantData={restaurantData}
-            loadingOrders={loadingOrders}
-            unhandledOrders={unhandledOrders}
-            confirmedOrders={confirmedOrders}
-            courierConfirmedOrders={courierConfirmedOrders}
-            handleConfirmOrder={handleConfirmOrder}
-            handleRejectOrder={handleRejectOrder}
-          />
-        )}
-        {/* 4. Order History Tab (activeTab === "orderHistory") 
-        This is where all orders that have completed the cycle go: A. Rejected by Timeout && B. Rejected by Restaurant Manager && C. Courier picked-up
-        */}
-        {activeTab === "orderHistory" && (
-          <OrderHistoryTab loadingOrders={loadingOrders} allOrders={orders}
-          archiveOldOrders={() => archiveOldOrders(orders, restaurantData.id)}
-          />
-        )}
+            {activeTab === "orders" && (
+              <OrdersTab
+                restaurantData={restaurantData}
+                loadingOrders={loadingOrders}
+                unhandledOrders={unhandledOrders}
+                confirmedOrders={confirmedOrders}
+                courierConfirmedOrders={courierConfirmedOrders}
+                handleConfirmOrder={handleConfirmOrder}
+                handleRejectOrder={handleRejectOrder}
+              />
+            )}
 
-        {/* 5. Settings Tab (activeTab === "settings") */}
-        {activeTab === "settings" && (
-          <SettingsTab
-            settings={settings}
-            onUpdateSettings={async (newSettings) => {
-              const updatedSettings = { ...settings, ...newSettings };
-              setSettings(updatedSettings);
+            {activeTab === "orderHistory" && (
+              <OrderHistoryTab
+                loadingOrders={loadingOrders}
+                allOrders={orders}
+                archiveOldOrders={() =>
+                  archiveOldOrders(orders, restaurantData.id)
+                }
+              />
+            )}
 
-              try {
-                  const docRef = doc(db, "restaurants", restaurantData.id);
-                  await updateDoc(docRef, {
+            {activeTab === "settings" && (
+              <SettingsTab
+                settings={settings}
+                onUpdateSettings={async (newSettings) => {
+                  const updatedSettings = { ...settings, ...newSettings };
+                  setSettings(updatedSettings);
+
+                  try {
+                    const docRef = doc(db, "restaurants", restaurantData.id);
+                    await updateDoc(docRef, {
                       autoSetting: updatedSettings.autoSetting,
                       serviceRange: updatedSettings.serviceRange,
-                  });
-                  console.log("Settings saved to Firestore:", updatedSettings);
-              } catch (err) {
-                  console.error("Failed to save settings:", err);
-              }
-          }}
-          />
+                    });
+                    console.log(
+                      "Settings saved to Firestore:",
+                      updatedSettings
+                    );
+                  } catch (err) {
+                    console.error("Failed to save settings:", err);
+                  }
+                }}
+              />
+            )}
+          </>
         )}
       </div>
     </div>
