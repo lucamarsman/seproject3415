@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  addDoc,
   collection,
   updateDoc,
   GeoPoint,
@@ -11,7 +10,6 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
-  deleteDoc,
   writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
@@ -59,20 +57,24 @@ export default function UserPage({ isSidebarOpen }) {
   const [activeTab, setActiveTab] = useState("home");
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
-  const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
+  const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] =
+    useState({});
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
   const [profileImgInput, setProfileImgInput] = useState("");
-  
+
   //"Routing" to a child tab when redirect to /user ; example: /user?activeTab=settings from OrderPage
   useEffect(() => {
-      const params = new URLSearchParams(location.search);
-      const tabFromUrl = params.get('activeTab');
-      if (tabFromUrl && ["home", "orders", "messages", "settings"].includes(tabFromUrl)) {
-          setActiveTab(tabFromUrl);
-      } else if (!tabFromUrl && location.pathname === '/user') {
-          setActiveTab("home");
-      }
+    const params = new URLSearchParams(location.search);
+    const tabFromUrl = params.get("activeTab");
+    if (
+      tabFromUrl &&
+      ["home", "orders", "messages", "settings"].includes(tabFromUrl)
+    ) {
+      setActiveTab(tabFromUrl);
+    } else if (!tabFromUrl && location.pathname === "/user") {
+      setActiveTab("home");
+    }
   }, [location.search]);
 
   const clearFormMessages = () => {
@@ -198,13 +200,13 @@ export default function UserPage({ isSidebarOpen }) {
           rLat,
           rLng
         );
-        return { ...r, distance: distance};
+        return { ...r, distance: distance };
       })
       .filter((r) => r);
-      //RESTAURANT SERVICE RANGE FILTER
+    //RESTAURANT SERVICE RANGE FILTER
     filtered = filtered.filter((r) => {
-        const maxDeliveryRange = r.serviceRange ?? 1000; 
-        return r.distance <= searchRadius && r.distance <= maxDeliveryRange;
+      const maxDeliveryRange = r.serviceRange ?? 1000;
+      return r.distance <= searchRadius && r.distance <= maxDeliveryRange;
     });
 
     if (searchTerm.trim()) {
@@ -255,14 +257,19 @@ export default function UserPage({ isSidebarOpen }) {
   useEffect(() => {
     if (!userData?.id || allRestaurants.length === 0) return;
     const unsubscribers = [];
-    
+
     for (const restaurant of allRestaurants) {
-      const ordersRef = collection(db, "restaurants", restaurant.id, "restaurantOrders");
+      const ordersRef = collection(
+        db,
+        "restaurants",
+        restaurant.id,
+        "restaurantOrders"
+      );
 
       const unsub = onSnapshot(ordersRef, async (snapshot) => {
         const now = new Date();
         const fetchedOrders = [];
-        
+
         for (const docSnap of snapshot.docs) {
           const orderId = docSnap.id;
           const orderData = docSnap.data();
@@ -277,22 +284,30 @@ export default function UserPage({ isSidebarOpen }) {
 
           if (shouldReject) {
             if (processingOrdersRef.current.has(orderId)) {
-              console.log(`⏩ Order ${orderId} is already being processed. Skipping re-trigger.`);
+              console.log(
+                `⏩ Order ${orderId} is already being processed. Skipping re-trigger.`
+              );
               continue;
             }
-            console.log(`⏰ Initiating auto-reject for timed-out order ${orderId}`);
+            console.log(
+              `⏰ Initiating auto-reject for timed-out order ${orderId}`
+            );
 
             processingOrdersRef.current.add(orderId);
             setUserOrders((prev) =>
               prev.map((o) =>
                 o.orderId === orderId
-                  ? { ...o, orderConfirmed: false, deliveryStatus: "Auto-rejected: Order timed out." }
+                  ? {
+                      ...o,
+                      orderConfirmed: false,
+                      deliveryStatus: "Auto-rejected: Order timed out.",
+                    }
                   : o
               )
             );
             await updateOrderToRejected(restaurant.id, orderId);
             processingOrdersRef.current.delete(orderId);
-            continue; 
+            continue;
           }
 
           fetchedOrders.push({
@@ -302,18 +317,20 @@ export default function UserPage({ isSidebarOpen }) {
           });
         }
 
-        const activeOrdersForRestaurant = fetchedOrders.filter(o => 
-            o.orderConfirmed !== false && o.orderCompleted !== true
+        const activeOrdersForRestaurant = fetchedOrders.filter(
+          (o) => o.orderConfirmed !== false && o.orderCompleted !== true
         );
 
         setUserOrders((prev) => {
-          const others = prev.filter((o) => o.fromRestaurant !== restaurant.storeName);
+          const others = prev.filter(
+            (o) => o.fromRestaurant !== restaurant.storeName
+          );
           return [...others, ...fetchedOrders];
         });
 
-        setRestaurantsWithActiveOrders(prev => ({
-            ...prev,
-            [restaurant.id]: activeOrdersForRestaurant
+        setRestaurantsWithActiveOrders((prev) => ({
+          ...prev,
+          [restaurant.id]: activeOrdersForRestaurant,
         }));
       });
       unsubscribers.push(unsub);
@@ -352,21 +369,27 @@ export default function UserPage({ isSidebarOpen }) {
 
     const checkAndRejectTimedOutOrders = async () => {
       const now = new Date();
-      const timedOut = userOrders.filter(order => {
-        const timeout = order.orderTimeout?.toDate?.() || (order.orderTimeout ? new Date(order.orderTimeout) : null);
+      const timedOut = userOrders.filter((order) => {
+        const timeout =
+          order.orderTimeout?.toDate?.() ||
+          (order.orderTimeout ? new Date(order.orderTimeout) : null);
         return timeout && timeout < now && order.orderConfirmed === null;
       });
       if (timedOut.length > 0) {
         console.log(`User-side: Found ${timedOut.length} timed-out orders.`);
         await Promise.all(
-          timedOut.map(order =>
+          timedOut.map((order) =>
             updateOrderToRejected(order.restaurantId, order.orderId)
           )
         );
-        setUserOrders(prev =>
-          prev.map(o =>
-            timedOut.some(t => t.orderId === o.orderId)
-              ? { ...o, orderConfirmed: false, deliveryStatus: "Auto-rejected: Order timed out." }
+        setUserOrders((prev) =>
+          prev.map((o) =>
+            timedOut.some((t) => t.orderId === o.orderId)
+              ? {
+                  ...o,
+                  orderConfirmed: false,
+                  deliveryStatus: "Auto-rejected: Order timed out.",
+                }
               : o
           )
         );
@@ -414,7 +437,6 @@ export default function UserPage({ isSidebarOpen }) {
 
     return () => clearTimeout(id);
   }, [activeTab, loading, fetchingUser]);
-
 
   // Handle phone and address update form submit
   const phoneRegex = /^[0-9()+\-\s.]{7,20}$/;
@@ -475,89 +497,120 @@ export default function UserPage({ isSidebarOpen }) {
     }
   };
 
-  const handleUserReply = async (orderId, newRestaurantNote, newOrderTimeout) => {
+  const handleUserReply = async (
+    orderId,
+    newRestaurantNote,
+    newOrderTimeout
+  ) => {
     if (!userData?.id) {
-          console.error("User data is not available to send a reply.");
-          throw new Error("User not authenticated.");
-      }
-      const orderToUpdate = userOrders.find(o => o.orderId === orderId);
-      if (!orderToUpdate || !orderToUpdate.restaurantId) {
-          console.error("Order or restaurantId not found for reply:", orderId);
-          throw new Error("Order not found or incomplete data.");
-      }
+      console.error("User data is not available to send a reply.");
+      throw new Error("User not authenticated.");
+    }
+    const orderToUpdate = userOrders.find((o) => o.orderId === orderId);
+    if (!orderToUpdate || !orderToUpdate.restaurantId) {
+      console.error("Order or restaurantId not found for reply:", orderId);
+      throw new Error("Order not found or incomplete data.");
+    }
 
-      // 1. Convert the plain object to a Firestore Timestamp
-      const dbTimeout = new Timestamp(newOrderTimeout.seconds, newOrderTimeout.nanoseconds);
-      
-      try {
-          const orderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);
-          
-          // 2. Update the document with the new notes array AND the new orderTimeout
-          await updateDoc(orderRef, { 
-              restaurantNote: newRestaurantNote,
-              orderTimeout: dbTimeout
-          });
+    // Convert the plain object to a Firestore Timestamp
+    const dbTimeout = new Timestamp(
+      newOrderTimeout.seconds,
+      newOrderTimeout.nanoseconds
+    );
 
-          // 3. Immediately reflect the change in the local state (userOrders)
-          setUserOrders(prev => 
-              prev.map(o => 
-                  o.orderId === orderId 
-                      ? { 
-                            ...o, 
-                            restaurantNote: newRestaurantNote, 
-                            orderTimeout: dbTimeout
-                        } 
-                      : o
-              )
-          );
-      } catch (error) {
-          console.error("Error sending user reply:", error);
-          throw new Error("Failed to send reply to the restaurant."); 
-      }
+    try {
+      const orderRef = doc(
+        db,
+        "restaurants",
+        orderToUpdate.restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+
+      // 2. Update the document with the new notes array AND the new orderTimeout
+      await updateDoc(orderRef, {
+        restaurantNote: newRestaurantNote,
+        orderTimeout: dbTimeout,
+      });
+
+      // 3. Immediately reflect the change in the local state (userOrders)
+      setUserOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === orderId
+            ? {
+                ...o,
+                restaurantNote: newRestaurantNote,
+                orderTimeout: dbTimeout,
+              }
+            : o
+        )
+      );
+    } catch (error) {
+      console.error("Error sending user reply:", error);
+      throw new Error("Failed to send reply to the restaurant.");
+    }
   };
 
- const handleConfirmDelivery = async (orderId) => {
+  const handleConfirmDelivery = async (orderId) => {
     if (!userData?.id) {
-        console.error("User data is not available to confirm delivery.");
-        return;
+      console.error("User data is not available to confirm delivery.");
+      return;
     }
-    
+
     // Find the current order data from local state
-    const orderToUpdate = userOrders.find(o => o.orderId === orderId);
+    const orderToUpdate = userOrders.find((o) => o.orderId === orderId);
     if (!orderToUpdate || !orderToUpdate.restaurantId) {
-        console.error("Order or restaurantId not found for confirmation:", orderId);
-        return;
+      console.error(
+        "Order or restaurantId not found for confirmation:",
+        orderId
+      );
+      return;
     }
 
     // IMPORTANT: Create the final data object
     const completedOrderData = {
-        ...orderToUpdate,
-        deliveryStatus: "Delivery confirmed.",
-        orderCompleted: true, 
-        deliveryConfirmed: true,
-        archivedAt: new Date(),
+      ...orderToUpdate,
+      deliveryStatus: "Delivery confirmed.",
+      orderCompleted: true,
+      deliveryConfirmed: true,
+      archivedAt: new Date(),
     };
-    
+
     // 1. Define Document References and Batch
-    const batch = writeBatch(db);    
-    const originalOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);    
-    const historyOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "orderHistory", orderId);
-    
+    const batch = writeBatch(db);
+    const originalOrderRef = doc(
+      db,
+      "restaurants",
+      orderToUpdate.restaurantId,
+      "restaurantOrders",
+      orderId
+    );
+    const historyOrderRef = doc(
+      db,
+      "restaurants",
+      orderToUpdate.restaurantId,
+      "orderHistory",
+      orderId
+    );
+
     try {
-        // --- 2. BATCH OPERATIONS ---        
-        batch.set(historyOrderRef, completedOrderData); 
-        batch.delete(originalOrderRef);
-        await batch.commit();
+      // --- 2. BATCH OPERATIONS ---
+      batch.set(historyOrderRef, completedOrderData);
+      batch.delete(originalOrderRef);
+      await batch.commit();
 
-        console.log(`Order ${orderId} successfully archived and deleted from active orders.`);
+      console.log(
+        `Order ${orderId} successfully archived and deleted from active orders.`
+      );
 
-        // --- 3. LOCAL STATE UPDATE ---
-        setUserOrders(prev => prev.filter(o => o.orderId !== orderId));
-        
+      // --- 3. LOCAL STATE UPDATE ---
+      setUserOrders((prev) => prev.filter((o) => o.orderId !== orderId));
     } catch (error) {
-        // Log the error to see if it was a network issue or a data error
-        console.error("Atomic confirmation/archiving failed:", error); 
-        alert("Failed to confirm delivery and archive order. Please check the console.");
+      // Log the error to see if it was a network issue or a data error
+      console.error("Atomic confirmation/archiving failed:", error);
+      alert(
+        "Failed to confirm delivery and archive order. Please check the console."
+      );
     }
   };
 
@@ -583,83 +636,82 @@ export default function UserPage({ isSidebarOpen }) {
 
       <main className="flex-1 p-6">
         {activeTab === "home" && (
-        <FilterBar
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          filters={filters}
-          setFilters={setFilters}
-          toggleType={toggleType}
-          clearTypes={clearTypes}
-          resultCount={filteredRestaurants.length}
-        />
-      )}
-  {tabLoading ? (
-    <>
-      {activeTab === "home" && <HomeTabSkeleton />}
-      {activeTab === "orders" && <OrdersTabSkeleton />}
-      {activeTab === "messages" && <MessagesTabSkeleton />}
-      {activeTab === "settings" && <SettingsTabSkeleton />}
-    </>
-  ) : (
-    <>
-      {activeTab === "orders" && (
-        <OrderTab 
-          userOrders={userOrders}
-          handleUserReply={handleUserReply}
-          userId={userData?.id}
-          userName={userData.name}
-          handleConfirmDelivery={handleConfirmDelivery}
-          Timestamp={Timestamp}
-        />
-      )}
+          <FilterBar
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            filters={filters}
+            setFilters={setFilters}
+            toggleType={toggleType}
+            clearTypes={clearTypes}
+            resultCount={filteredRestaurants.length}
+          />
+        )}
+        {tabLoading ? (
+          <>
+            {activeTab === "home" && <HomeTabSkeleton />}
+            {activeTab === "orders" && <OrdersTabSkeleton />}
+            {activeTab === "messages" && <MessagesTabSkeleton />}
+            {activeTab === "settings" && <SettingsTabSkeleton />}
+          </>
+        ) : (
+          <>
+            {activeTab === "orders" && (
+              <OrderTab
+                userOrders={userOrders}
+                handleUserReply={handleUserReply}
+                userId={userData?.id}
+                userName={userData.name}
+                handleConfirmDelivery={handleConfirmDelivery}
+                Timestamp={Timestamp}
+              />
+            )}
 
-      {activeTab === "settings" && (
-        <SettingTab
-          defaultProfileImg={userData?.profileImg || defaultProfileImg}
-          editIcon={editIcon}
-          nameInput={nameInput}
-          setNameInput={setNameInput}
-          emailInput={emailInput}
-          setEmailInput={setEmailInput}
-          phoneInput={phoneInput}
-          setPhoneInput={setPhoneInput}
-          addressInput={addressInput}
-          setAddressInput={setAddressInput}
-          savingProfile={savingProfile}
-          onSubmit={handleProfileSubmit}
-          formError={formError}
-          formSuccess={formSuccess}
-          onClearMessages={clearFormMessages}
-          profileImgInput={profileImgInput}     
-          setProfileImgInput={setProfileImgInput}
-        />
-      )}
+            {activeTab === "settings" && (
+              <SettingTab
+                defaultProfileImg={userData?.profileImg || defaultProfileImg}
+                editIcon={editIcon}
+                nameInput={nameInput}
+                setNameInput={setNameInput}
+                emailInput={emailInput}
+                setEmailInput={setEmailInput}
+                phoneInput={phoneInput}
+                setPhoneInput={setPhoneInput}
+                addressInput={addressInput}
+                setAddressInput={setAddressInput}
+                savingProfile={savingProfile}
+                onSubmit={handleProfileSubmit}
+                formError={formError}
+                formSuccess={formSuccess}
+                onClearMessages={clearFormMessages}
+                profileImgInput={profileImgInput}
+                setProfileImgInput={setProfileImgInput}
+              />
+            )}
 
-      {activeTab === "home" && (
-        <HomeTab
-          userLatLng={userLatLng}
-          filteredRestaurants={filteredRestaurants}
-          restaurantsWithActiveOrders={restaurantsWithActiveOrders}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          filters={filters}
-          setFilters={setFilters}
-          clearTypes={clearTypes}
-          toggleType={toggleType}
-          searchRadius={searchRadius}
-          currentDateTime={currentDateTime}
-          navigate={navigate}
-          setSearchRadius={setSearchRadius}
-        />
-      )}
+            {activeTab === "home" && (
+              <HomeTab
+                userLatLng={userLatLng}
+                filteredRestaurants={filteredRestaurants}
+                restaurantsWithActiveOrders={restaurantsWithActiveOrders}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                filters={filters}
+                setFilters={setFilters}
+                clearTypes={clearTypes}
+                toggleType={toggleType}
+                searchRadius={searchRadius}
+                currentDateTime={currentDateTime}
+                navigate={navigate}
+                setSearchRadius={setSearchRadius}
+              />
+            )}
 
-      {activeTab === "messages" && (
-        <MessagesTab userMessages={userMessages} />
-      )}
-    </>
-  )}
-</main>
-
+            {activeTab === "messages" && (
+              <MessagesTab userMessages={userMessages} />
+            )}
+          </>
+        )}
+      </main>
     </div>
   );
 }
