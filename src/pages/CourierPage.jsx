@@ -1,3 +1,4 @@
+// CourierPage.jsx
 import { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { Navigate } from "react-router-dom";
@@ -17,7 +18,6 @@ import {
   increment,
   Timestamp,
 } from "firebase/firestore";
-import { calcLocalCourierDist } from "../utils/calcLocalCourierDist.js";
 import { coordinateFormat } from "../utils/coordinateFormat";
 import { calculateEtaCourier } from "../utils/calculateEtaCourier";
 
@@ -30,7 +30,10 @@ const safeWrap = (fn) => {
   }
 };
 
-// Utility: Calculate meters between two lat/lon points (Haversine)
+/**
+ * Haversine distance in meters between two { latitude, longitude } coordinates
+ * Used for movement analysis and route simulator distance calculations
+ */
 const metersBetween = (a, b) => {
   const R = 6371000;
   const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
@@ -45,16 +48,154 @@ const metersBetween = (a, b) => {
   return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 };
 
-const MAX_ACCEPT_DISTANCE_METERS = 10000; // 10 km radius to accept a task
-const SIM_ORIGIN = { latitude: 44.356118, longitude: -79.627597 }; // Harman home (dev simulator)
+// Max distance allowed between courier and restaurant to accept a task
+const MAX_ACCEPT_DISTANCE_METERS = 10000;
 
+// Dev simulator origin point (Harman's house)
+const SIM_ORIGIN = { latitude: 44.356118, longitude: -79.627597 };
+
+// Helper function that calls the public OSRM API to get a driving route between two coordinate points
+async function fetchOsrmRoute(from, to) {
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/` +
+    `${from.longitude},${from.latitude};` +
+    `${to.longitude},${to.latitude}` +
+    `?overview=full&geometries=geojson`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`OSRM HTTP ${res.status}`);
+  }
+  const data = await res.json();
+
+  if (!data.routes || !data.routes[0]) {
+    throw new Error(data.code || "No route");
+  }
+
+  // Normalize to {latitude, longitude}
+  const coords = data.routes[0].geometry.coordinates;
+  return coords.map(([lng, lat]) => ({
+    latitude: lat,
+    longitude: lng,
+  }));
+}
+
+/**
+ * Get or create route for leg:
+ *  - "toRestaurant": SIM_ORIGIN -> restaurant
+ *  - "toUser": restaurant -> user
+ *
+ * Uses Firestore fields:
+ *  - routeToRestaurant
+ *  - routeToUser
+ *
+ * If OSRM fails, falls back to a straight line [from, to].
+ */
+async function getOrCreateRouteForTaskLeg(task, leg) {
+  const field = leg === "toUser" ? "routeToUser" : "routeToRestaurant";
+
+  // Use stored route if it exists
+  if (Array.isArray(task[field]) && task[field].length > 1) {
+    return task[field].map((p) => ({
+      latitude: p.latitude,
+      longitude: p.longitude,
+    }));
+  }
+
+  // const from/to based on leg type
+  const restaurantLoc = coordinateFormat(task.restaurantLocation);
+  const userLoc = coordinateFormat(task.userLocation);
+
+  if (
+    !restaurantLoc ||
+    typeof restaurantLoc.latitude !== "number" ||
+    typeof restaurantLoc.longitude !== "number"
+  ) {
+    throw new Error("Invalid restaurantLocation for OSRM route");
+  }
+
+  let from, to;
+
+  if (leg === "toRestaurant") {
+    // SIM_ORIGIN -> restaurant
+    from = SIM_ORIGIN;
+    to = restaurantLoc;
+  } else {
+    // restaurant -> user
+    if (
+      !userLoc ||
+      typeof userLoc.latitude !== "number" ||
+      typeof userLoc.longitude !== "number"
+    ) {
+      throw new Error("Invalid userLocation for OSRM route");
+    }
+    from = restaurantLoc;
+    to = userLoc;
+  }
+
+  let route = null;
+
+  try {
+    route = await fetchOsrmRoute(from, to);
+    if (!route || route.length < 2) {
+      throw new Error("OSRM route too short");
+    }
+  } catch (err) {
+    console.warn(
+      `OSRM failed for leg ${leg}, falling back to straight line:`,
+      err
+    );
+    // Fallback: simple straight line between from/to
+    route = [from, to];
+  }
+
+  // Save back to Firestore for reuse
+  try {
+    const orderRef = doc(
+      db,
+      "restaurants",
+      task.restaurantId,
+      "restaurantOrders",
+      task.orderId
+    );
+    await updateDoc(orderRef, {
+      [field]: route,
+    });
+  } catch (err) {
+    console.warn(
+      "Failed to persist fallback/OSRM route to Firestore (using in-memory anyway):",
+      err
+    );
+  }
+
+  return route;
+}
+
+/**
+ * CourierPage - main dashboard for delivery couriers:
+ *  - Authenticates user and links them to a couriers doc (and creates one if needed)
+ *  - Tracks courier location (real GPS / dev simulator) and:
+ *       - Updates Firestore with location, status, and a throttled movementFlag
+ *       - Derives movement phase and basic metrics (speed, ETA, distances)
+ *  - Manages the current task:
+ *       - Listens to the assigned order in restaurantOrders
+ *       - Supports pickup confirmation and delivery confirmation
+ *       - Updates ETA and deliveryStatus after pickup
+ *  - Lists available tasks:
+ *       - Subscribes to all open and unassigned orders across restaurants
+ *       - Sorts by earliest prep time and shortest total_Distance
+ *       - Enforces a max accept distance (unless simulator is used)
+ *  - Uses OSRM routes:
+ *       - Computes and persists routeToRestaurant / routeToUser per order
+ *       - Drives the dev GPS simulator along those stored routes
+ */
 export default function CourierPage() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [courierData, setCourierData] = useState(null);
   const [fetchingCourier, setFetchingCourier] = useState(true);
   const [error, setError] = useState("");
-  const [locationAccessDenied, setLocationAccessDenied] = useState(false);
+  const [setLocationAccessDenied] = useState(false);
   const [orders, setOrders] = useState([]);
   const [fetchingOrders, setFetchingOrders] = useState(true);
   const [currentTask, setCurrentTask] = useState(null);
@@ -63,10 +204,14 @@ export default function CourierPage() {
   const currentTaskRef = useRef(currentTask);
 
   const lastGPSRef = useRef(null);
-  const lastETARef = useRef(null);
   const movementRef = useRef({ lastMoveTime: 0 });
   const movementStateRef = useRef("IDLE"); // IDLE | MOVING | NEAR_DESTINATION | STOPPED_TOO_LONG
   const lastUpdateTimeRef = useRef(0); // throttle Firestore location updates
+
+  // Route-based simulator refs
+  const simRouteRef = useRef(null); // [{ latitude, longitude }, ...]
+  const simRouteIndexRef = useRef(0); // current index in simRouteRef
+  const simSegmentFracRef = useRef(0);
 
   // UI movement meta: status text, ETA, last GPS update, etc.
   const [movementMeta, setMovementMeta] = useState({
@@ -79,17 +224,24 @@ export default function CourierPage() {
     distToUserKm: null,
   });
 
-  // Simple simulator for dev: fake GPS from Harman's home towards target
+  // Simple simulator for dev: now follows the stored route
   const [simulator, setSimulator] = useState({
     enabled: true, // dev: turn off in production
     running: false,
     speedKmh: 30,
-    stepMs: 2000,
+    stepMs: 1000,
     origin: SIM_ORIGIN,
     target: null,
   });
-  const simulatorIntervalRef = useRef(null);
 
+  useEffect(() => {
+    simulatorSpeedRef.current = simulator.speedKmh;
+  }, [simulator.speedKmh]);
+
+  const simulatorIntervalRef = useRef(null);
+  const simulatorSpeedRef = useRef(30);
+
+  // Helper function to log and store movement state when it changes
   const updateMovementState = (newState) => {
     if (movementStateRef.current !== newState) {
       movementStateRef.current = newState;
@@ -97,6 +249,7 @@ export default function CourierPage() {
     }
   };
 
+  // Keep refs in sync with state so async logic uses the latest
   useEffect(() => {
     courierDataRef.current = courierData;
   }, [courierData]);
@@ -107,6 +260,7 @@ export default function CourierPage() {
 
   const CURRENT_TIME_MS = Date.now();
 
+  // Helper funciton to format order timestamps
   const formatOrderTimestamp = (timestamp) => {
     return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
   };
@@ -118,41 +272,7 @@ export default function CourierPage() {
     return currentTime <= orderTimeMs;
   };
 
-  const fetchCurrentTaskStatus = async (orderId, restaurantId) => {
-    const task = currentTaskRef.current;
-    if (!orderId || !restaurantId || !task) return;
-
-    try {
-      const orderRef = doc(
-        db,
-        "restaurants",
-        restaurantId,
-        "restaurantOrders",
-        orderId
-      );
-      const orderSnap = await getDoc(orderRef);
-
-      if (!orderSnap.exists()) {
-        console.warn(`Order document not found: ${orderId}`);
-        if (task.orderId === orderId) setCurrentTask(null);
-        return;
-      }
-
-      const updatedPickupStatus = !!orderSnap.data().courierPickedUp;
-
-      if (updatedPickupStatus !== task.courierPickedUp) {
-        setCurrentTask((prev) => ({
-          ...prev,
-          courierPickedUp: updatedPickupStatus,
-        }));
-        console.log(`Task pickup status updated to: ${updatedPickupStatus}`);
-      }
-    } catch (error) {
-      console.error("Error fetching task status:", error);
-    }
-  };
-
-  // Helper: Update courier status in Firestore and state
+  // Helper function to update courier status in Firestore and state
   const updateCourierDoc = async (updates) => {
     const currentCourierId = courierDataRef.current?.id;
     if (!currentCourierId) return;
@@ -177,7 +297,7 @@ export default function CourierPage() {
     }
   };
 
-  // Helper: Returns a user-friendly location error message based on code
+  // Helper function that returns a user-friendly location error message based on code
   const getLocationErrorMessage = (code) => {
     switch (code) {
       case 1:
@@ -191,6 +311,7 @@ export default function CourierPage() {
     }
   };
 
+  // Firebase auth listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -199,8 +320,7 @@ export default function CourierPage() {
     return unsubscribe;
   }, []);
 
-  // LOGIN OR CREATE USER
-  // POTENTIAL UPDATE: UID could be used here, but everyone would have to recreate their couriers
+  // Login or create user
   useEffect(() => {
     if (!user) return;
 
@@ -210,6 +330,7 @@ export default function CourierPage() {
         const q = query(couriersRef, where("email", "==", user.email));
         const snapshot = await getDocs(q);
 
+        // Existing courier found
         if (!snapshot.empty) {
           const matchedDoc = snapshot.docs[0];
           setCourierData({ id: matchedDoc.id, ...matchedDoc.data() });
@@ -217,6 +338,7 @@ export default function CourierPage() {
           return;
         }
 
+        // No existing courier found
         if (!navigator.geolocation) {
           setError(
             "Location services are unavailable on your device. Please enable location access to resume courier capabilities."
@@ -225,6 +347,7 @@ export default function CourierPage() {
           return;
         }
 
+        // Generate geolocation for initial profile
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const { latitude, longitude, accuracy } = position.coords;
@@ -238,6 +361,7 @@ export default function CourierPage() {
               status: "inactive",
             };
 
+            // Create the new courier doc
             const docRef = await addDoc(couriersRef, newCourier);
             await updateDoc(docRef, { courierId: docRef.id });
 
@@ -278,7 +402,10 @@ export default function CourierPage() {
     fetchOrCreateCourier();
   }, [user]);
 
-  // Helper: Update Order Task ETA (Firestore + local currentTask)
+  /**
+   * Function that updates currentTask’s ETA once the courier has picked up the order
+   *    - Writes into the order doc (and local state) using calculateEtaCourier
+   */
   const updateCourierTask = async (latestFormattedLocation) => {
     const task = currentTaskRef.current;
     const courier = courierDataRef.current;
@@ -312,6 +439,7 @@ export default function CourierPage() {
 
     let updates = {};
 
+    // Only update ETA once the order is picked up from restaurant
     if (task.courierPickedUp) {
       updates = calculateEtaCourier(formattedCourierLoc, formattedUserLoc, now);
       updates.deliveryStatus = "Delivery enroute.";
@@ -387,7 +515,7 @@ export default function CourierPage() {
           movementRef.current.lastMoveTime = now;
         }
 
-        // --- Smart Task Phase & Distance Computation (Option 3) ---
+        // --- Smart Task Phase & Distance Computation ---
         const task = currentTaskRef.current;
         let phaseLabel = "Available";
         let distToRestaurantMeters = null;
@@ -395,7 +523,7 @@ export default function CourierPage() {
 
         if (task) {
           try {
-            // 1) Distance to restaurant
+            // Distance to restaurant
             if (task.restaurantLocation) {
               const restLoc = coordinateFormat(task.restaurantLocation);
               if (
@@ -407,7 +535,7 @@ export default function CourierPage() {
               }
             }
 
-            // 2) Distance to user
+            // Distance to user
             if (task.userLocation) {
               const userLoc = coordinateFormat(task.userLocation);
               if (
@@ -419,7 +547,7 @@ export default function CourierPage() {
               }
             }
 
-            // 3) Determine phase based on pickup + distances
+            // Determine phase based on pickup and distances
             if (!task.courierPickedUp) {
               // Before pickup
               if (
@@ -492,10 +620,7 @@ export default function CourierPage() {
           if (task && task.courierPickedUp && distToUserMeters != null) {
             const distKm = distToUserMeters / 1000;
             const assumedSpeed = 30; // km/h
-            etaMinutes = Math.max(
-              1,
-              Math.round((distKm / assumedSpeed) * 60)
-            );
+            etaMinutes = Math.max(1, Math.round((distKm / assumedSpeed) * 60));
           }
 
           setMovementMeta((prev) => ({
@@ -534,9 +659,7 @@ export default function CourierPage() {
 
         // Update UI movement meta
         const distUserKm =
-          typeof distToUserMeters === "number"
-            ? distToUserMeters / 1000
-            : null;
+          typeof distToUserMeters === "number" ? distToUserMeters / 1000 : null;
         const distRestKm =
           typeof distToRestaurantMeters === "number"
             ? distToRestaurantMeters / 1000
@@ -577,111 +700,146 @@ export default function CourierPage() {
     return () => navigator.geolocation.clearWatch(watcher);
   }, [courierData?.id, simulator.enabled]);
 
-  // --- Simulator GPS effect ---
+  // --- Route-based Simulator GPS effect ---
   useEffect(() => {
     if (!simulator.enabled || !simulator.running) return;
     if (!courierData?.id) return;
-    if (!simulator.target) return;
 
-    // clear any previous interval
+    // Clear previous interval before creating a new one
     if (simulatorIntervalRef.current) {
       clearInterval(simulatorIntervalRef.current);
     }
 
     simulatorIntervalRef.current = setInterval(() => {
       safeWrap(async () => {
+        const route = simRouteRef.current;
         const task = currentTaskRef.current;
-        const now = Date.now();
 
-        // current simulated position (fallback to origin)
-        const current =
-          lastGPSRef.current && typeof lastGPSRef.current.latitude === "number"
-            ? lastGPSRef.current
-            : { ...simulator.origin, timestamp: now };
-
-        const target = simulator.target;
-        if (
-          !target ||
-          typeof target.latitude !== "number" ||
-          typeof target.longitude !== "number"
-        ) {
-          console.warn("Simulator target is invalid, stopping.");
-          setSimulator((prev) => ({ ...prev, running: false }));
+        if (!route || route.length < 2) {
+          console.warn("Simulator has no valid route - stopping.");
+          setSimulator((p) => ({ ...p, running: false }));
           return;
         }
 
-        const distMeters = metersBetween(current, target);
+        let idx = simRouteIndexRef.current || 0;
+        let frac = simSegmentFracRef.current || 0;
 
-        // Arrived near target
-        if (distMeters < 10) {
-          lastGPSRef.current = { ...target, timestamp: now };
+        const end = route[route.length - 1];
+
+        // If at or beyond the last point, treat as arrival
+        if (idx >= route.length - 1) {
+          const pos = { ...end, timestamp: Date.now() };
+          lastGPSRef.current = pos;
+
           updateMovementState("NEAR_DESTINATION");
           await updateCourierDoc({
-            location: target,
+            location: pos,
             movementFlag: "NEAR_DESTINATION",
             status: "active",
           });
-          await updateCourierTask(target);
+          await updateCourierTask(pos);
+
           setMovementMeta((prev) => ({
             ...prev,
-            lastUpdate: now,
+            lastUpdate: Date.now(),
             speedKmh: 0,
-            phase: "Sim · Arrived at restaurant",
-            distToRestaurantKm: 0,
+            etaMinutes: 0,
+            phase: task?.courierPickedUp
+              ? "Sim · Arrived near customer"
+              : "Sim · Arrived at restaurant",
           }));
-          setSimulator((prev) => ({ ...prev, running: false }));
+
+          setSimulator((p) => ({ ...p, running: false }));
           return;
         }
 
-        // Move a small step towards target based on speed and stepMs
-        const speedMps = (simulator.speedKmh * 1000) / 3600;
-        const dtSec = simulator.stepMs / 1000;
-        const travel = speedMps * dtSec;
-        const ratio = Math.min(1, travel / distMeters);
+        // Metric movement logic along route
+        const speedKmh = simulator.speedKmh || 30;
+        const mps = (speedKmh * 1000) / 3600; // km/h -> m/s
+        const dt = simulator.stepMs / 1000; // ms -> sec
+        let moveMeters = mps * dt;
 
-        const next = {
-          latitude:
-            current.latitude + (target.latitude - current.latitude) * ratio,
-          longitude:
-            current.longitude + (target.longitude - current.longitude) * ratio,
-        };
+        // Segment skipping - move across multiple segments if needed
+        while (moveMeters > 0 && idx < route.length - 1) {
+          const A = route[idx];
+          const B = route[idx + 1];
+          const segmentMeters = metersBetween(A, B);
 
-        lastGPSRef.current = { ...next, timestamp: now };
-        updateMovementState("MOVING");
+          const distRemaining = segmentMeters * (1 - frac);
 
-        await updateCourierDoc({
-          location: next,
-          movementFlag: "MOVING",
-          status: "active",
-        });
-        await updateCourierTask(next);
+          if (moveMeters < distRemaining) {
+            // Stay on this segment
+            frac += moveMeters / segmentMeters;
+            moveMeters = 0;
+          } else {
+            // Finish this segment and move to next
+            moveMeters -= distRemaining;
+            idx++;
+            frac = 0;
 
-        const remainingMeters = Math.max(0, distMeters - travel);
-        const remainingKm = remainingMeters / 1000;
-        let etaMinutes = null;
-        if (simulator.speedKmh > 0 && remainingKm > 0) {
-          etaMinutes = Math.max(
-            1,
-            Math.round((remainingKm / simulator.speedKmh) * 60)
-          );
+            if (idx >= route.length - 1) break;
+          }
         }
 
-                const distKm = distMeters / 1000;
+        simRouteIndexRef.current = idx;
+        simSegmentFracRef.current = frac;
 
+        // Interpolate current simulated position
+        const A = route[idx];
+        const B = route[Math.min(idx + 1, route.length - 1)];
+
+        const lat = A.latitude + (B.latitude - A.latitude) * frac;
+        const lng = A.longitude + (B.longitude - A.longitude) * frac;
+
+        const newPos = { latitude: lat, longitude: lng, timestamp: Date.now() };
+
+        // Push GPS update
+        lastGPSRef.current = newPos;
+        updateMovementState(
+          idx >= route.length - 1 ? "NEAR_DESTINATION" : "MOVING"
+        );
+
+        await updateCourierDoc({
+          location: newPos,
+          movementFlag: idx >= route.length - 1 ? "NEAR_DESTINATION" : "MOVING",
+          status: "active",
+        });
+
+        await updateCourierTask(newPos);
+
+        // Remaining distance to end of route (for ETA)
+        let remMeters = 0;
+        if (idx < route.length - 1) {
+          // Add remaining full segments
+          for (let i = idx; i < route.length - 1; i++) {
+            remMeters += metersBetween(route[i], route[i + 1]);
+          }
+          // Subtract the fractional part already traveled
+          const segMeters = metersBetween(A, B);
+          remMeters -= segMeters * frac;
+        }
+
+        const remKm = remMeters / 1000;
+        const etaMinutes =
+          speedKmh > 0
+            ? Math.max(1, Math.round((remKm / speedKmh) * 60))
+            : null;
+
+        // Update UI
         setMovementMeta((prev) => ({
           ...prev,
-          lastUpdate: now,
-          speedKmh: simulator.speedKmh,
+          lastUpdate: Date.now(),
+          speedKmh,
+          etaMinutes,
+          distToRestaurantKm:
+            task && !task.courierPickedUp ? remKm : prev.distToRestaurantKm,
+          distToUserKm:
+            task && task.courierPickedUp ? remKm : prev.distToUserKm,
           phase: task
             ? task.courierPickedUp
               ? "Sim · Delivering"
               : "Sim · Heading to restaurant"
             : "Sim · Moving",
-          etaMinutes,
-          distToRestaurantKm:
-            task && !task.courierPickedUp ? distKm : prev.distToRestaurantKm,
-          distToUserKm:
-            task && task.courierPickedUp ? distKm : prev.distToUserKm,
         }));
       });
     }, simulator.stepMs);
@@ -697,7 +855,6 @@ export default function CourierPage() {
     simulator.running,
     simulator.speedKmh,
     simulator.stepMs,
-    simulator.target,
     courierData?.id,
   ]);
 
@@ -799,7 +956,11 @@ export default function CourierPage() {
   // handleAccept
   const handleAccept = async (order) => {
     // Require courier to be near the restaurant before accepting the task
-    if (!simulator.enabled && courierData?.location && order?.restaurantLocation) {
+    if (
+      !simulator.enabled &&
+      courierData?.location &&
+      order?.restaurantLocation
+    ) {
       try {
         const courierLoc = {
           latitude: courierData.location.latitude,
@@ -849,37 +1010,59 @@ export default function CourierPage() {
 
       batch.update(courierDocRef, {
         currentTask: order.orderId,
+        currentRestaurant: order.restaurantId,
       });
 
       await batch.commit();
 
-      setCurrentTask({ ...order, courierId: courierData.courierId });
+      const newTask = {
+        ...order,
+        orderId: order.orderId,
+        restaurantId: order.restaurantId,
+        courierId: courierData.courierId,
+      };
+      setCurrentTask(newTask);
       setOrders((prev) => prev.filter((o) => o.orderId !== order.orderId));
 
-      // Auto-start simulator from Harman's home to the restaurant (dev only)
-      if (simulator.enabled) {
-        const origin = SIM_ORIGIN;
-        const targetLoc = order.restaurantLocation
-          ? coordinateFormat(order.restaurantLocation)
-          : null;
+      // Precompute routeToRestaurant so HomeTab + simulator can reuse it
+      try {
+        await getOrCreateRouteForTaskLeg(newTask, "toRestaurant");
+      } catch (e) {
+        console.warn("Could not precompute routeToRestaurant at accept:", e);
+      }
 
-        if (
-          targetLoc &&
-          typeof targetLoc.latitude === "number" &&
-          typeof targetLoc.longitude === "number"
-        ) {
-          lastGPSRef.current = { ...origin, timestamp: Date.now() };
-          updateCourierDoc({
-            location: origin,
+      // Auto-start simulator along route from SIM_ORIGIN -> restaurant (dev only)
+      if (simulator.enabled) {
+        try {
+          const route = await getOrCreateRouteForTaskLeg(
+            newTask,
+            "toRestaurant"
+          );
+          if (!route || route.length < 2) {
+            console.warn(
+              "Route for sim (toRestaurant) is too short, not starting sim."
+            );
+            return;
+          }
+
+          simRouteRef.current = route;
+          simRouteIndexRef.current = 0;
+
+          const first = route[0];
+          lastGPSRef.current = { ...first, timestamp: Date.now() };
+
+          await updateCourierDoc({
+            location: first,
             movementFlag: "MOVING",
             status: "active",
           });
+
           setSimulator((prev) => ({
             ...prev,
             running: true,
-            origin,
-            target: targetLoc,
           }));
+        } catch (e) {
+          console.error("Failed to start sim to restaurant:", e);
         }
       }
     } catch (err) {
@@ -888,7 +1071,7 @@ export default function CourierPage() {
     }
   };
 
-    const handlePickupOrder = async (orderId) => {
+  const handlePickupOrder = async (orderId) => {
     if (!orderId || !courierData?.id) return;
 
     const task = currentTaskRef.current;
@@ -928,32 +1111,33 @@ export default function CourierPage() {
       await updateDoc(orderRef, updates);
 
       // Update local state copy of the task
+      const updatedTask = { ...task, ...updates };
       setCurrentTask((prev) =>
-        prev && prev.orderId === orderId ? { ...prev, ...updates } : prev
+        prev && prev.orderId === orderId ? updatedTask : prev
       );
 
-      // If simulator is enabled, retarget from restaurant to user location
-      if (simulator.enabled && task.userLocation) {
-        const userLoc = coordinateFormat(task.userLocation);
-        if (
-          userLoc &&
-          typeof userLoc.latitude === "number" &&
-          typeof userLoc.longitude === "number"
-        ) {
-          const origin =
-            lastGPSRef.current &&
-            typeof lastGPSRef.current.latitude === "number" &&
-            typeof lastGPSRef.current.longitude === "number"
-              ? {
-                  latitude: lastGPSRef.current.latitude,
-                  longitude: lastGPSRef.current.longitude,
-                }
-              : SIM_ORIGIN;
+      // If simulator is enabled, retarget via routeToUser
+      if (simulator.enabled && updatedTask.userLocation) {
+        try {
+          const route = await getOrCreateRouteForTaskLeg(
+            { ...updatedTask },
+            "toUser"
+          );
+          if (!route || route.length < 2) {
+            console.warn(
+              "Route for sim (toUser) is too short, not starting sim."
+            );
+            return;
+          }
 
+          simRouteRef.current = route;
+          simRouteIndexRef.current = 0;
+
+          const origin = route[0];
           lastGPSRef.current = { ...origin, timestamp: Date.now() };
 
           // Keep courier doc in sync
-          updateCourierDoc({
+          await updateCourierDoc({
             location: origin,
             movementFlag: "MOVING",
             status: "active",
@@ -962,9 +1146,9 @@ export default function CourierPage() {
           setSimulator((prev) => ({
             ...prev,
             running: true,
-            origin,
-            target: userLoc,
           }));
+        } catch (e) {
+          console.warn("Failed to start sim to user after pickup:", e);
         }
       }
     } catch (err) {
@@ -1026,6 +1210,7 @@ export default function CourierPage() {
 
       batch.update(courierRef, {
         currentTask: "",
+        currentRestaurant: "",
         earnings: increment(paymentCourier),
       });
 
@@ -1056,15 +1241,18 @@ export default function CourierPage() {
         ...prev,
         earnings: (prev.earnings || 0) + paymentCourier,
         currentTask: "",
+        currentRestaurant: "",
       }));
 
-      setSimulator(prev => ({
+      setSimulator((prev) => ({
         ...prev,
         running: false,
-        target: null
+        target: null,
       }));
 
-lastGPSRef.current = null;
+      simRouteRef.current = null;
+      simRouteIndexRef.current = 0;
+      lastGPSRef.current = null;
 
       console.log(
         `Order ${orderId} successfully marked as complete and courier earnings updated.`
@@ -1186,8 +1374,8 @@ lastGPSRef.current = null;
                   Simulator (dev)
                 </h2>
                 <p className="text-[11px] text-gray-500">
-                  Simulates GPS from 44.356118, -79.627597 towards the current
-                  task&apos;s restaurant. Turn off when using a real device.
+                  Simulates GPS along the stored OSRM route. Turn off when using
+                  a real device.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-[11px]">
@@ -1212,14 +1400,16 @@ lastGPSRef.current = null;
                 <input
                   type="number"
                   min={5}
-                  max={80}
+                  max={800}
                   value={simulator.speedKmh}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const val = Number(e.target.value) || 0;
+                    simulatorSpeedRef.current = val; // keep ref in sync
                     setSimulator((prev) => ({
                       ...prev,
-                      speedKmh: Number(e.target.value) || 0,
-                    }))
-                  }
+                      speedKmh: val,
+                    }));
+                  }}
                   className="w-16 border rounded px-1 py-0.5 text-xs"
                 />
                 <span>km/h</span>
@@ -1229,37 +1419,47 @@ lastGPSRef.current = null;
                 type="button"
                 className="px-3 py-1 rounded bg-sky-600 text-white text-xs font-medium hover:bg-sky-700 disabled:opacity-40"
                 disabled={!simulator.enabled || !currentTask}
-                onClick={() => {
-                  if (!currentTask) return;
-                  const targetLoc = currentTask.restaurantLocation
-                    ? coordinateFormat(currentTask.restaurantLocation)
-                    : null;
-                  if (
-                    !targetLoc ||
-                    typeof targetLoc.latitude !== "number" ||
-                    typeof targetLoc.longitude !== "number"
-                  ) {
-                    alert(
-                      "Current task does not have a valid restaurantLocation to simulate."
+                onClick={async () => {
+                  const task = currentTaskRef.current;
+                  if (!task) return;
+
+                  const leg = task.courierPickedUp ? "toUser" : "toRestaurant";
+
+                  try {
+                    const route = await getOrCreateRouteForTaskLeg(
+                      { ...task },
+                      leg
                     );
-                    return;
+                    if (!route || route.length < 2) {
+                      alert("Route has too few points to simulate.");
+                      return;
+                    }
+
+                    simRouteRef.current = route;
+                    simRouteIndexRef.current = 0;
+
+                    const first = route[0];
+                    lastGPSRef.current = { ...first, timestamp: Date.now() };
+
+                    await updateCourierDoc({
+                      location: first,
+                      movementFlag: "MOVING",
+                      status: "active",
+                    });
+
+                    setSimulator((prev) => ({
+                      ...prev,
+                      running: true,
+                    }));
+                  } catch (e) {
+                    console.error("Failed to start sim for current leg:", e);
+                    alert(
+                      `Failed to get route: ${e.message || "Unknown error"}`
+                    );
                   }
-                  const origin = SIM_ORIGIN;
-                  lastGPSRef.current = { ...origin, timestamp: Date.now() };
-                  updateCourierDoc({
-                    location: origin,
-                    movementFlag: "MOVING",
-                    status: "active",
-                  });
-                  setSimulator((prev) => ({
-                    ...prev,
-                    running: true,
-                    origin,
-                    target: targetLoc,
-                  }));
                 }}
               >
-                Start sim to restaurant
+                Start sim for current leg
               </button>
 
               {simulator.running && (
@@ -1312,12 +1512,9 @@ lastGPSRef.current = null;
                     {courierData.email || "—"}
                   </div>
                   <div>
-                    <span className="font-medium text-gray-600">
-                      Earnings:
-                    </span>{" "}
+                    <span className="font-medium text-gray-600">Earnings:</span>{" "}
                     <span className="font-semibold text-emerald-700">
-                      $
-                      {(courierData.earnings ?? 0).toFixed(2)}
+                      ${(courierData.earnings ?? 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -1349,9 +1546,7 @@ lastGPSRef.current = null;
                   {courierData.movementFlag || "—"}
                 </div>
                 <div>
-                  <span className="font-medium text-gray-600">
-                    GPS status:
-                  </span>{" "}
+                  <span className="font-medium text-gray-600">GPS status:</span>{" "}
                   {courierData.status || "—"}
                 </div>
                 {movementMeta.distToRestaurantKm != null && currentTask && (
@@ -1421,10 +1616,7 @@ lastGPSRef.current = null;
                           {currentTask.orderId}
                         </td>
                         <td className="py-1 px-2 font-semibold text-green-600">
-                          $
-                          {Number(
-                            currentTask.paymentCourier ?? 0
-                          ).toFixed(2)}
+                          ${Number(currentTask.paymentCourier ?? 0).toFixed(2)}
                         </td>
                         <td className="py-1 px-2">
                           {currentTask.courier_R_Distance}km
@@ -1451,8 +1643,7 @@ lastGPSRef.current = null;
                     ))}
                   </ul>
 
-                  {/* Action Button */}
-                                    {/* Action Buttons */}
+                  {/* Action Buttons */}
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     {!currentTask.courierPickedUp && (
                       <button
@@ -1512,9 +1703,7 @@ lastGPSRef.current = null;
                             <tr>
                               <th className="py-2 px-2 text-left">Order ID</th>
                               <th className="py-2 px-2 text-left">Payout</th>
-                              <th className="py-2 px-2 text-left">
-                                Ready At
-                              </th>
+                              <th className="py-2 px-2 text-left">Ready At</th>
                               <th className="py-2 px-2 text-left">
                                 Restaurant Distance:{" "}
                                 <span className="font-normal">
@@ -1535,10 +1724,7 @@ lastGPSRef.current = null;
                                 {order.orderId}
                               </td>
                               <td className="py-1 px-2 font-semibold">
-                                $
-                                {Number(
-                                  order.paymentCourier ?? 0
-                                ).toFixed(2)}
+                                ${Number(order.paymentCourier ?? 0).toFixed(2)}
                               </td>
                               <td
                                 className={`text-sm ${
