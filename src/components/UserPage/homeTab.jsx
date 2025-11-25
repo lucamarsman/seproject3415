@@ -738,7 +738,13 @@ export default function HomeTab({
                   state: { restaurant: r },
                 });
               }}
-              className="flex flex-col h-full text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
+              className="
+    flex flex-col h-full text-left border rounded-lg bg-white shadow-sm
+    transition-all duration-200 transform
+    hover:scale-[1.02] hover:shadow-lg
+    focus:outline-none focus:ring-2 focus:ring-blue-500
+    cursor-pointer overflow-hidden
+  "
             >
               <div className="relative w-full aspect-[5/1] bg-gray-100 overflow-hidden">
                 {getBannerUrl(r) ? (

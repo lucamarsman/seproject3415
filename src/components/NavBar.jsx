@@ -7,12 +7,18 @@ import "../index.css";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
-export default function NavBar({ onSelectRole, isSidebarOpen, onToggleSidebar }) {
+export default function NavBar({
+  onSelectRole,
+  isSidebarOpen,
+  onToggleSidebar,
+}) {
   const [user, setUser] = useState(null);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [acctMenuOpen, setAcctMenuOpen] = useState(false);
   const [profileImg, setProfileImg] = useState(null);
-  const [selectedRole, setSelectedRole] = useState(() => localStorage.getItem("selectedRole"));
+  const [selectedRole, setSelectedRole] = useState(() =>
+    localStorage.getItem("selectedRole")
+  );
   const roleMenuRef = useRef(null);
   const acctMenuRef = useRef(null);
   const navigate = useNavigate();
