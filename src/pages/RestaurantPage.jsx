@@ -19,12 +19,12 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { updateOrderToRejected } from "../utils/updateOrderToRejected.js";
+import { updateOrderToRejected } from "../utils/updateOrderToRejected.js"; //utils
 import { coordinateFormat } from "../utils/coordinateFormat.js";
 import { geocodeAddress } from "../utils/geocodeAddress.js";
 import { calculateEtaRestaurant } from "../utils/calculateEtaRestaurant.js";
 
-import InfoTab from "../components/RestaurantPage/infoTab";
+import InfoTab from "../components/RestaurantPage/infoTab"; //components
 import Sidebar from "../components/RestaurantPage/sidebar";
 import OrdersTab from "../components/RestaurantPage/ordersTab";
 import OrderHistoryTab from "../components/RestaurantPage/orderHistoryTab";
@@ -38,6 +38,7 @@ import OrdersTabSkeleton from "../components/OrdersTabSkeleton.jsx";
 import OrderHistoryTabSkeleton from "../components/OrderHistoryTabSkeleton.jsx";
 import RestaurantSettingsTabSkeleton from "../components/RestaurantSettingsTabSkeleton.jsx";
 
+// HELPER FUNCTION: populate the local state hours
 function parseHoursArray(hoursArray) {
   const result = {};
   hoursArray.forEach((dayObj) => {
@@ -47,12 +48,14 @@ function parseHoursArray(hoursArray) {
   return result;
 }
 
+// HELPER FUNCTION: format hours to Firestore database format: array/map
 function formatHoursForFirestore(hoursObject) {
   return Object.entries(hoursObject).map(([day, times]) => ({
     [day]: times,
   }));
 }
 
+// RESTAURANT MANAGER PAGE - for logged in restaurant managers
 export default function RestaurantPage() {
   const [activeTab, setActiveTab] = useState("info");
   const [user, setUser] = useState(null);
@@ -62,10 +65,8 @@ export default function RestaurantPage() {
   const [error, setError] = useState("");
   const [hoursState, setHoursState] = useState({});
   const [tabLoading, setTabLoading] = useState(false);
-  // For orders
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
-  // Dropdown options
   const [cuisineTypes, setCuisineTypes] = useState([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [selectedType, setSelectedType] = useState("");
@@ -74,7 +75,7 @@ export default function RestaurantPage() {
     serviceRange: 50,
   });
 
-  // useEffect: Authenticate listener - for displaying either a new or existing account, during login
+  // useEffect: Authentication listener - for displaying either a new or existing account, during login
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -83,9 +84,9 @@ export default function RestaurantPage() {
     return () => unsub();
   }, []);
 
+  // useEffect: Timeout for visual loading effect on page load
   useEffect(() => {
     if (loadingAuth || fetchingRestaurant) return;
-
     setTabLoading(true);
     const id = setTimeout(() => {
       setTabLoading(false);
@@ -94,6 +95,7 @@ export default function RestaurantPage() {
     return () => clearTimeout(id);
   }, [activeTab, loadingAuth, fetchingRestaurant]);
 
+  // useEffect: Get cuisine type icons from Firestore database collection systemFiles
   useEffect(() => {
     const fetchCuisineTypes = async () => {
       setLoadingTypes(true);
@@ -120,6 +122,7 @@ export default function RestaurantPage() {
     fetchCuisineTypes();
   }, []);
 
+  // useEffect: sets the restaurant data to the local state
   useEffect(() => {
     if (!restaurantData) return;
     if (restaurantData.hours) {
@@ -133,7 +136,7 @@ export default function RestaurantPage() {
     }
   }, [restaurantData, cuisineTypes]);
 
-  // Fetch or create restaurant based on logged-in user
+  // userEffect: Fetch or create restaurant based on logged-in user
   // POTENTIAL UPDATE: UID could be used here, but everyone would have to recreate their restaurants
   // While the UID is the same for User, Restaurant, and Courier -> the search path is different (so it will return the correct data)
   useEffect(() => {
@@ -203,15 +206,14 @@ export default function RestaurantPage() {
     fetchOrCreate();
   }, [user]);
 
-  // Realtime listener for restaurantOrders
+  // VARIABLE: Realtime listener for restaurantOrders
   const ordersRef = useRef(orders);
-
-  // Update the ref whenever the 'orders' state changes
+  // useEffect: Updates ordersRef whenever the 'orders' state changes
   useEffect(() => {
     ordersRef.current = orders;
   }, [orders]);
 
-  // Archiving collection restaurantOrders orders to collection orderHistory (in the case the user does not press button "Confirm Delivery" - optional)
+  // FUNCTION: Archiving collection restaurantOrders orders to collection orderHistory (in the case the user does not press button "Confirm Delivery" - optional)
   const archiveOldOrders = async (ordersToProcess, restaurantId) => {
     if (!restaurantId) return;
     const ONE_HOUR_MS = 1 * 60 * 60 * 1000;
@@ -219,19 +221,18 @@ export default function RestaurantPage() {
     console.log(currentTime);
 
     const oldOrdersToArchive = ordersToProcess.filter((order) => {
-      // --- Case A: orderCompleted = true and 1+ hours old (Courier delivered) ---
+      // Case A: orderCompleted = true and 1+ hours old (Courier delivered)
       const isOldCompleted =
         order.orderCompleted === true &&
         order.completedAt?.toDate?.() &&
         currentTime - order.completedAt.toDate().getTime() > ONE_HOUR_MS;
 
-      // --- Case B: orderConfirmed = false and 1+ hours old (Rejected by restaurant/timeout) ---
+      // Case B: orderConfirmed = false and 1+ hours old (Rejected by restaurant/timeout)
       const isOldRejected =
         order.orderConfirmed === false &&
         order.createdAt?.toDate?.() &&
         currentTime - order.createdAt.toDate().getTime() > ONE_HOUR_MS;
 
-      // Return true if either case is met
       return isOldCompleted || isOldRejected;
     });
 
@@ -239,73 +240,44 @@ export default function RestaurantPage() {
       console.log("No old orders to archive.");
       return;
     }
-    const batch = writeBatch(db);
-    const archivedOrderIds = [];
 
+    const batch = writeBatch(db); // copy the old order to orderHistory archive; then delete it in a single write
+    const archivedOrderIds = [];
     for (const order of oldOrdersToArchive) {
       const orderId = order.orderId;
-      // 1. Define Document References
-      const originalOrderRef = doc(
-        db,
-        "restaurants",
-        restaurantId,
-        "restaurantOrders",
-        orderId
-      );
-      const historyOrderRef = doc(
-        db,
-        "restaurants",
-        restaurantId,
-        "orderHistory",
-        orderId
-      );
+      const originalOrderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
+      const historyOrderRef = doc(db, "restaurants", restaurantId, "orderHistory", orderId);
 
-      // 2. Prepare Data for History
       const historyData = {
         ...order,
         archivedAt: serverTimestamp(),
       };
-
-      // A. Copy: Use batch.set to create the document in history with the same ID
       batch.set(historyOrderRef, historyData);
       batch.delete(originalOrderRef);
       archivedOrderIds.push(orderId);
     }
-
     try {
       await batch.commit();
       setOrders((prev) =>
         prev.filter((o) => !archivedOrderIds.includes(o.orderId))
       );
       console.log(
-        `✅ Successfully archived and deleted old orders: ${archivedOrderIds.join(
-          ", "
-        )}`
+        `Successfully archived and deleted old orders: ${archivedOrderIds.join(", ")}`
       );
     } catch (error) {
-      console.error("Batch archiving of old orders failed:", error);
+      console.error("Archiving of old orders failed:", error);
     }
   };
 
-  // UPDATES ALL ORDER STATUSES
+  // useEffect: Updates all order statuses (using a 5000 ms polling strategy)
+  // MAJOR FUNCTIONS: 1. Calculating individual order ETA related to the restaurant
+  //                  2. Updating order status of timed out orders (rejections)
   useEffect(() => {
     if (!restaurantData?.id) return;
-    const ordersCollectionRef = collection(
-      db,
-      "restaurants",
-      restaurantData.id,
-      "restaurantOrders"
-    );
+    const ordersCollectionRef = collection(db, "restaurants", restaurantData.id, "restaurantOrders");
     let firstLoad = true;
 
     const processOrders = async (ordersArray) => {
-      // 0. ARCHIVE ALL OLD COMPLETED ORDERS
-      /*
-      if (restaurantData?.id) {
-        await archiveOldOrders(ordersArray, restaurantData.id);
-      }
-      const ordersArray = ordersRef.current;*/
-
       // 1. COURIER TRACKING AND ETA CALCULATION (activeOrders only)
       const activeOrders = ordersArray.filter(
         (order) =>
@@ -324,7 +296,7 @@ export default function RestaurantPage() {
         const updateBatch = writeBatch(db);
         const localUpdates = [];
 
-        // Fetch all unique courier locations in parallel
+        // Fetch all unique courier locations
         await Promise.all(
           Array.from(uniqueCourierIds).map(async (courierId) => {
             const courierDocRef = doc(db, "couriers", courierId);
@@ -338,14 +310,15 @@ export default function RestaurantPage() {
             }
           })
         );
-        // Loop through active orders to calculate ETA
+        
+        // Calculate ETA of all active orders
         for (const order of activeOrders) {
           const courier = courierDataMap.get(order.courierId);
           const courierLocation = coordinateFormat(courier?.location);
           const restaurantLocation = coordinateFormat(order.restaurantLocation);
           const userLocation = coordinateFormat(order.userLocation);
 
-          // Validation of all coordinates (must be done before the utility function call)
+          // Validate all coordinates to prevent ETA calculation errors
           const locationValid =
             courierLocation &&
             typeof courierLocation.latitude === "number" &&
@@ -360,12 +333,9 @@ export default function RestaurantPage() {
           let preppedDate = new Date(now.getTime() + 5 * 60000);
           let remainingPrepDurationMinutes = 5; // Default
 
-          if (order.estimatedPreppedTime?.toDate) {
+          if (order.estimatedPreppedTime?.toDate) { // in case estimatedPreppedTime not defined or null
             preppedDate = order.estimatedPreppedTime.toDate();
-            // Calculate the difference in milliseconds and convert to minutes
-            remainingPrepDurationMinutes = Math.max(
-              0,
-              Math.round((preppedDate.getTime() - now.getTime()) / 60000)
+            remainingPrepDurationMinutes = Math.max(0, Math.round((preppedDate.getTime() - now.getTime()) / 60000) // convert milliseconds to minutes
             );
           }
 
@@ -389,17 +359,8 @@ export default function RestaurantPage() {
             console.log("Courier location issue.");
           }
 
-          // Add update to the batch
-          const orderRef = doc(
-            db,
-            "restaurants",
-            restaurantData.id,
-            "restaurantOrders",
-            order.orderId
-          );
-
-          // Update the order document
-          // Removed fields: courier_R_EtaMinutes: updates.courier_R_EtaMinutes || NaN, courier_U_EtaMinutes: updates.courier_U_EtaMinutes || NaN,
+          // Update the order document with updates values
+          const orderRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", order.orderId);
           updateBatch.update(orderRef, {
             courierLocation: courierLocation,
             courier_R_Distance: updates.C_R_distanceKm || NaN,
@@ -411,13 +372,13 @@ export default function RestaurantPage() {
             total_Distance: updates.total_Distance || NaN,
           });
 
-          // Prepare local state update
+          // Update the local state
           localUpdates.push({
             orderId: order.orderId,
             deliveryStatus: newDeliveryStatus,
           });
         }
-        // Commit the batch updates to Firestore
+        // Pass to Firestore database
         if (localUpdates.length > 0) {
           try {
             await updateBatch.commit();
@@ -437,7 +398,7 @@ export default function RestaurantPage() {
         }
       }
 
-      // --- 2. EXISTING TIMEOUT REJECTION LOGIC ---
+      // 2. TIMEOUT REJECTION - reject the order if order.orderTimeout < current date (now)
       const now = new Date();
       const timedOutOrders = ordersArray.filter((order) => {
         const timeout =
@@ -453,14 +414,14 @@ export default function RestaurantPage() {
 
       if (timedOutOrders.length === 0) return;
 
-      // 1. Run the atomic update for all timed-out orders
+      // 2A. Update all timed-out orders
       const rejectionResults = await Promise.all(
         timedOutOrders.map((order) =>
           updateOrderToRejected(restaurantData.id, order.orderId)
         )
       );
 
-      // 2. Update local state for all successful rejections
+      // 2B. Update local state for all successful rejections
       const successfullyRejectedIds = timedOutOrders
         .filter((_, index) => rejectionResults[index].success)
         .map((order) => order.orderId);
@@ -507,7 +468,7 @@ export default function RestaurantPage() {
       }
     );
 
-    // 2. INTERVAL: Triggers the action (ETA update and auto-reject) every 5 seconds
+    // INTERVAL: Triggers polling action (ETA update and auto-reject) every 5 seconds
     const interval = setInterval(() => {
       const currentOrders = ordersRef.current;
       if (currentOrders.length === 0) return;
@@ -520,18 +481,11 @@ export default function RestaurantPage() {
     };
   }, [restaurantData?.id]);
 
-  // CASE: RESTAURANT ACCEPTS ORDER
+  // FUNCTION: Case - Restaurant accepts order
   const handleConfirmOrder = async (orderId) => {
+    // Get order data
     try {
-      const orderDocRef = doc(
-        db,
-        "restaurants",
-        restaurantData.id,
-        "restaurantOrders",
-        orderId
-      );
-
-      // GET ORDER DATA
+      const orderDocRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
       let orderData = orders.find((o) => o.orderId === orderId);
       if (!orderData) {
         const orderSnap = await getDoc(orderDocRef);
@@ -542,10 +496,9 @@ export default function RestaurantPage() {
         }
         orderData = orderSnap.data();
       }
+      const totalPrepTime = orderData.totalPrepTime || 0; 
 
-      const totalPrepTime = orderData.totalPrepTime || 0;
-
-      // UPDATE RESTAURANT DATA
+      // 1. Update the restaurant itself: restaurants/{restaurantId} with payment data
       const restaurantRef = doc(db, "restaurants", restaurantData.id);
       const paymentRestaurant = orderData.paymentRestaurant || 0;
       await updateDoc(restaurantRef, {
@@ -558,7 +511,7 @@ export default function RestaurantPage() {
       estimatedTimeDate.setMinutes(currentTime.getMinutes() + totalPrepTime);
       const estimatedPreppedTime = Timestamp.fromDate(estimatedTimeDate);
 
-      // 3. UPDATE ORDER IN FIRESTORE (1 Write)
+      // 2A. Update the restaurant order: orderDocRef with with accepted order value changes
       await updateDoc(orderDocRef, {
         orderConfirmed: true,
         deliveryStatus: "Confirmed, order being prepared.",
@@ -566,7 +519,7 @@ export default function RestaurantPage() {
         estimatedPreppedTime: estimatedPreppedTime,
       });
 
-      //LOCAL STATE
+      // 2B. Update the local state with current order changes
       setOrders((prev) =>
         prev.map((o) =>
           o.orderId === orderId
@@ -586,48 +539,37 @@ export default function RestaurantPage() {
     }
   };
 
+   // FUNCTION: Case - Restaurant rejects order
   const handleRejectOrder = async (orderId) => {
-    // 1. Define the reference to the order document
-    const orderDocRef = doc(
-      db,
-      "restaurants",
-      restaurantData.id,
-      "restaurantOrders",
-      orderId
-    );
-
+    // Get order data
+    const orderDocRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
     try {
-      // --- 1. READ the document to get the userId ---
       const orderSnapshot = await getDoc(orderDocRef);
       if (!orderSnapshot.exists()) {
         console.error(`Order ${orderId} not found.`);
         setError("Order not found.");
         return;
       }
-
       const orderData = orderSnapshot.data();
       const userId = orderData.userId;
-
       if (!userId) {
         console.error(
           `userId not found on order ${orderId}. Cannot notify customer.`
         );
       }
 
-      // --- 2. UPDATE the Order Status (Rejection) ---
+      // 1A. Update the restaurant order status variables to rejected
       await updateDoc(orderDocRef, {
         orderConfirmed: false,
         deliveryStatus: "Rejected by restaurant.",
       });
-
       console.log(`Order ${orderId} successfully rejected.`);
 
-      // --- 3. SEND Message to Customer (Conditional on userId) ---
+      // 1B. Create a message to the user (informing them of a rejected order)
       if (userId) {
         const messagesRef = collection(db, "users", userId, "messages");
-
         await addDoc(messagesRef, {
-          createdAt: serverTimestamp(), // Use Firestore serverTimestamp
+          createdAt: serverTimestamp(),
           message:
             "Rejected by restaurant. Order could not be fulfilled, refund sent.",
           read: false,
@@ -638,7 +580,7 @@ export default function RestaurantPage() {
         console.log(`Message sent to user ${userId}.`);
       }
 
-      // --- 4. Update Local State ---
+      // 1C. Update the local state with current order changes
       setOrders((prev) =>
         prev.map((o) =>
           o.orderId === orderId
@@ -656,7 +598,7 @@ export default function RestaurantPage() {
     }
   };
 
-  /* AUTO ACCEPT AND REJECT ORDER */
+  // useEffect: handles restaurant order cases when there is a note
   const handledOrders = useRef(new Set());
   useEffect(() => {
     if (!restaurantData?.id || orders.length === 0) return;
@@ -665,11 +607,13 @@ export default function RestaurantPage() {
       (o) => o.orderConfirmed == null && !handledOrders.current.has(o.orderId)
     );
     if (unhandled.length === 0) return;
+    // If restaurant is set to autoSetting "accept", orders now require a manual review by the restaurant manager
+    // Order is now subject to its timeout value (it can be rejected)
     if (settings.autoSetting === "accept") {
       for (const order of unhandled) {
         if (order.restaurantNote.length > 0) {
           console.log(
-            `⚠️ Order ${order.orderId} skipped auto-accept due to special customer note. Manual review required.`
+            `Order ${order.orderId} skipped auto-accept customer note. Manual review required.`
           );
         } else {
           handledOrders.current.add(order.orderId);
@@ -684,27 +628,29 @@ export default function RestaurantPage() {
     }
   }, [orders, restaurantData, settings]);
 
-  // Rendering
+  // ERROR PREVENTION (PAGE)
   if (loadingAuth || fetchingRestaurant) return <RestaurantPageSkeleton />;
   if (!user) return <Navigate to="/login" />;
   if (error)
     return <div className="p-6 text-red-600 font-semibold">Error: {error}</div>;
 
-  //Restaurant orderTab heading: New Orders
+  // Arrays of orders to be viewed under separate headings
+  // Restaurant orderTab heading: New Orders
   const unhandledOrders = orders.filter(
     (order) => order.orderConfirmed == null
   );
-  //Restaurant orderTab heading: Confirmed Orders
+  // Restaurant orderTab heading: Confirmed Orders
   const confirmedOrders = orders.filter(
     (order) => order.orderConfirmed === true && order.courierConfirmed === false
   );
-  //Restaurant orderTab heading: Confirmed Confirmed Orders
+  // Restaurant orderTab heading: Confirmed Confirmed Orders
   const courierConfirmedOrders = orders.filter(
     (order) =>
       order.courierConfirmed === true && order.courierPickedUp === false
   );
   const pendingCount = unhandledOrders.length;
 
+  // USER INTERFACE
   return (
     <div className="flex min-h-screen">
       <Sidebar

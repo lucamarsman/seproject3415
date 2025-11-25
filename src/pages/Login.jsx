@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { auth } from "../firebase";
 
-// LOGIN VIEW PAGE - On clicking "Login as" and a dropdown selection
+// LOGIN PAGE - On clicking "Login as" and a dropdown selection
 export default function Login({ role }) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);

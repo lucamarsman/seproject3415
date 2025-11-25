@@ -473,7 +473,7 @@ export default function CourierPage() {
     }
   };
 
-  // --- GPS Throttling, Movement Analysis & Location Update ---
+  // GPS Throttling, Movement Analysis & Location Update
   useEffect(() => {
     if (simulator.enabled) return; // Skip real GPS when simulator is enabled
     if (!navigator.geolocation || !courierData?.id) return;
@@ -512,7 +512,7 @@ export default function CourierPage() {
           movementRef.current.lastMoveTime = now;
         }
 
-        // --- Smart Task Phase & Distance Computation ---
+        // Smart Task Phase & Distance Computation
         const task = currentTaskRef.current;
         let phaseLabel = "Available";
         let distToRestaurantMeters = null;
@@ -693,7 +693,7 @@ export default function CourierPage() {
     return () => navigator.geolocation.clearWatch(watcher);
   }, [courierData?.id, simulator.enabled]);
 
-  // --- Route-based Simulator GPS effect ---
+  // Route-based Simulator GPS effect
   useEffect(() => {
     if (!simulator.enabled || !simulator.running) return;
     if (!courierData?.id) return;
@@ -844,7 +844,7 @@ export default function CourierPage() {
     courierData?.id,
   ]);
 
-  /* --- REALTIME COURIER LISTENER (Phase 1) --- */
+  /* REALTIME COURIER LISTENER (Phase 1) */
   useEffect(() => {
     if (!courierData?.id) return;
     const ref = doc(db, "couriers", courierData.id);
@@ -859,7 +859,7 @@ export default function CourierPage() {
     return () => unsub();
   }, [courierData?.id]);
 
-  /* --- REALTIME TASK LISTENER (Phase 2) --- */
+  /* REALTIME TASK LISTENER (Phase 2) */
   useEffect(() => {
     if (!courierData?.currentTask) {
       setCurrentTask(null);
@@ -879,7 +879,7 @@ export default function CourierPage() {
     return () => unsub();
   }, [courierData?.currentTask]);
 
-  /* --- REALTIME AVAILABLE ORDERS LISTENER (Phase 3) --- */
+  /* REALTIME AVAILABLE ORDERS LISTENER (Phase 3) */
 
   // Stores unsubscribe functions for each restaurant’s orders listener
   const [restaurantListeners, setRestaurantListeners] = useState([]);
@@ -1250,7 +1250,7 @@ export default function CourierPage() {
     }
   };
 
-  // ---- UI Helpers ----
+  // UI Helpers
   const renderStatusChip = () => {
     const status = courierData?.status || "inactive";
     const movement = courierData?.movementFlag || "IDLE";

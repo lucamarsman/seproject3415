@@ -25,17 +25,19 @@ import MessagesTab from "../components/UserPage/messageTab";
 import SettingTab from "../components/UserPage/settingTab";
 import OrderTab from "../components/UserPage/orderTab";
 import Sidebar from "../components/UserPage/sideBar";
+import FilterBar from "../components/UserPage/filterBar.jsx";
+
 import UserPageSkeleton from "../components/UserPageSkeleton";
 import HomeTabSkeleton from "../components/HomeTabSkeleton.jsx";
 import OrdersTabSkeleton from "../components/OrderTabSkeleton.jsx";
 import MessagesTabSkeleton from "../components/MessagesTabSkeleton";
 import SettingsTabSkeleton from "../components/SettingsTabSkeleton";
-import FilterBar from "../components/UserPage/filterBar.jsx";
 
 import { dummyRestaurants } from "../assets/dummyRestaurants.js"; // assets
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
 
+// USER PAGE - for logged in users
 export default function UserPage({ isSidebarOpen }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +105,7 @@ export default function UserPage({ isSidebarOpen }) {
 
   const navigate = useNavigate();
 
-  // useEffect: Authenticate listener - for displaying either a new or existing account, during login
+  // useEffect: Authentication listener - for displaying either a new or existing account, during login
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -246,7 +248,7 @@ export default function UserPage({ isSidebarOpen }) {
 
   // VARIABLE: used to create a Set datatype (so only unique orders are matched during processing rejected orders)
   const processingOrdersRef = useRef(new Set());
-  // useEffect: Processing rejected orders
+  // useEffect: Processing rejected orders on user side
   useEffect(() => {
     if (!userData?.id || allRestaurants.length === 0) return;
     const unsubscribers = [];
@@ -326,7 +328,7 @@ export default function UserPage({ isSidebarOpen }) {
     return () => unsubscribers.forEach((u) => u());
   }, [userData?.id, allRestaurants, setUserMessages, setUserOrders]);
 
-  // useEffect: MESSAGE LISTENER FOR USER
+  // useEffect: Message listener for user
   useEffect(() => {
     if (!userData?.id) return;
     const messagesRef = collection(db, "users", userData.id, "messages");

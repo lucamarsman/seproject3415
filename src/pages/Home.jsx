@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
-// HOME VIEW PAGE - Entry url for all users (links to Login.jsx and BrowseRestaurants.jsx)
+// HOME PAGE - Entry url for all users (links to Login.jsx and BrowseRestaurants.jsx)
 export default function Home() {
     const navigate = useNavigate();
     const [restaurantTypes, setRestaurantTypes] = useState([]);

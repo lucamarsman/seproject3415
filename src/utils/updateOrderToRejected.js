@@ -20,7 +20,7 @@ export async function updateOrderToRejected(restaurantId, orderId) {
   let messagesRef;
 
   try {
-    // --- Get userId and check for existing message (Non-Atomic) ---
+    // Get userId and check for existing message (Non-Atomic)
     const initialOrderSnapshot = await getDoc(orderDocRef);
     if (!initialOrderSnapshot.exists()) {
       console.warn(`Order ${orderId} not found for auto-rejection.`);
@@ -33,7 +33,7 @@ export async function updateOrderToRejected(restaurantId, orderId) {
       const existingMsgSnap = await getDocs(existingMsgQuery);
 
       if (!existingMsgSnap.empty) {
-        console.log(`✅ Timeout message already exists for order ${orderId}, skipping message creation.`);
+        console.log(`Timeout message already exists for order ${orderId}, skipping message creation.`);
         existingMessageFound = true;
       }
     }
@@ -52,7 +52,7 @@ export async function updateOrderToRejected(restaurantId, orderId) {
       });
 
       if (userId && !existingMessageFound) {
-        // Send new message to user (Atomic Set)
+        // Send new message to user
         messageText = "Your order timed out and could not be fulfilled. Refund has been initiated.";
         const newMessageRef = doc(messagesRef); 
         transaction.set(newMessageRef, {
@@ -68,13 +68,13 @@ export async function updateOrderToRejected(restaurantId, orderId) {
       }
     });
 
-    console.log(`⏰ Order ${orderId} auto-rejected due to timeout.`);
+    console.log(`Order ${orderId} auto-rejected due to timeout.`);
     return { success: true, userId, message: messageText, messageCreated: messageWasCreated };
   } catch (err) {
     if (err.message === "OrderNotFound") {
       return { success: false, messageCreated: false };
     }
-    console.error(`❌ Failed to auto-reject order ${orderId}:`, err);
+    console.error(`Failed to auto-reject order ${orderId}:`, err);
     return { success: false, messageCreated: false };
   }
 }
