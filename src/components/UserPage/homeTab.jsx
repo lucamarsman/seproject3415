@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { getFirestore, doc, updateDoc, onSnapshot } from "firebase/firestore";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  updateDoc,
+  onSnapshot,
+} from "firebase/firestore";
 import {
   MapContainer,
   TileLayer,
@@ -555,6 +561,15 @@ export default function HomeTab({
     return Array.from(byId.values());
   }, [filteredRestaurants, restaurantsWithActiveOrders]);
 
+  // Flatten active orders (For use in UI)
+  const flatActiveOrders = useMemo(
+    () =>
+      Object.values(restaurantsWithActiveOrders || {})
+        .flat()
+        .filter((o) => o.orderConfirmed && !o.orderCompleted),
+    [restaurantsWithActiveOrders]
+  );
+
   const shouldFitBounds = filteredRestaurants.length > 0;
 
   // Markers used for initial fitBounds (user and all restaurantsOnMap)
@@ -605,6 +620,22 @@ export default function HomeTab({
       observer.unobserve(el);
     };
   }, [filteredRestaurants.length, visibleCount, isLoadingMore]);
+
+  // Helper for active order UI
+  const getOrderLegendStatus = (order) => {
+    if (order.courierPickedUp) {
+      // courier has the food, going to user
+      return "Courier heading to user";
+    }
+
+    if (order.courierConfirmed) {
+      // courier accepted but hasn't picked up yet
+      return "Courier heading to restaurant";
+    }
+
+    // restaurant has confirmed, no courier yet
+    return "Confirmed by restaurant";
+  };
 
   // Render homeTab components
   return (
@@ -709,6 +740,44 @@ export default function HomeTab({
                 );
               })}
           </MapContainer>
+          {flatActiveOrders.length > 0 && (
+            <div className="pointer-events-none absolute top-2 right-2 z-[1000]">
+              <div className="bg-white/90 rounded-lg shadow px-2 py-1 max-h-32 overflow-y-auto min-w-[190px] pointer-events-auto">
+                <p className="text-[10px] font-semibold text-gray-700 mb-1">
+                  Active orders
+                </p>
+
+                <ul className="space-y-1">
+                  {flatActiveOrders.map((order) => (
+                    <li
+                      key={`${order.restaurantId}__${order.orderId}`}
+                      className="flex items-start gap-2 text-[10px]"
+                    >
+                      <span
+                        className="mt-[3px] w-2 h-2 rounded-full flex-shrink-0"
+                        style={{
+                          backgroundColor: stringToColor(order.orderId),
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="truncate font-medium">
+                            {order.storeName ||
+                              order.restaurantName ||
+                              `Order ${order.orderId.slice(0, 6)}`}
+                          </span>
+                        </div>
+
+                        <div className="text-[10px] text-gray-600">
+                          {getOrderLegendStatus(order)}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <h2 className="mt-8 text-xl">
