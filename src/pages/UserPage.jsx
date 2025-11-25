@@ -37,6 +37,8 @@ import { dummyRestaurants } from "../assets/dummyRestaurants.js"; // assets
 import defaultProfileImg from "../assets/defaultProfile.svg";
 import editIcon from "../assets/edit.svg";
 
+import deliverySound from "../assets/order-delivered.wav"; // Import audio file for order delivery sound
+
 // USER PAGE - for logged in users
 export default function UserPage({ isSidebarOpen }) {
   const [user, setUser] = useState(null);
@@ -59,7 +61,8 @@ export default function UserPage({ isSidebarOpen }) {
   const [activeTab, setActiveTab] = useState("home");
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
-  const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] = useState({});
+  const [restaurantsWithActiveOrders, setRestaurantsWithActiveOrders] =
+    useState({});
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
   const [profileImgInput, setProfileImgInput] = useState("");
@@ -204,11 +207,13 @@ export default function UserPage({ isSidebarOpen }) {
       })
       .filter((r) => r);
 
-    filtered = filtered.filter((r) => { // CONDITION: restaurant service range filter
+    filtered = filtered.filter((r) => {
+      // CONDITION: restaurant service range filter
       const maxDeliveryRange = r.serviceRange ?? 1000;
       return r.distance <= searchRadius && r.distance <= maxDeliveryRange;
     });
-    if (searchTerm.trim()) { // CONDITION: search term
+    if (searchTerm.trim()) {
+      // CONDITION: search term
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(
         (r) =>
@@ -216,12 +221,14 @@ export default function UserPage({ isSidebarOpen }) {
           r.address?.toLowerCase().includes(term)
       );
     }
-    if (filters.openNow) { // CONDITION: restaurant opening hours
+    if (filters.openNow) {
+      // CONDITION: restaurant opening hours
       filtered = filtered.filter((r) =>
         isRestaurantOpenToday(r.hours, currentDateTime)
       );
     }
-    if (filters.types?.length) { // CONDITION: cuisine type
+    if (filters.types?.length) {
+      // CONDITION: cuisine type
       filtered = filtered.filter((r) => filters.types.includes(r.type));
     }
     const sorted = [...filtered]; //SORT BY: distance, rating, name
@@ -248,13 +255,30 @@ export default function UserPage({ isSidebarOpen }) {
 
   // VARIABLE: used to create a Set datatype (so only unique orders are matched during processing rejected orders)
   const processingOrdersRef = useRef(new Set());
+
+  // References for order completion audio
+  const deliveryAudioRef = useRef(null);
+  const prevDeliveredIdsRef = useRef(new Set());
+  const firstDeliveryCheckRef = useRef(true);
+
+  useEffect(() => {
+    const audio = new Audio(deliverySound);
+    audio.volume = 1;
+    deliveryAudioRef.current = audio;
+  }, []);
+
   // useEffect: Processing rejected orders on user side
   useEffect(() => {
     if (!userData?.id || allRestaurants.length === 0) return;
     const unsubscribers = [];
 
     for (const restaurant of allRestaurants) {
-      const ordersRef = collection(db, "restaurants", restaurant.id, "restaurantOrders");
+      const ordersRef = collection(
+        db,
+        "restaurants",
+        restaurant.id,
+        "restaurantOrders"
+      );
 
       const unsub = onSnapshot(ordersRef, async (snapshot) => {
         const now = new Date();
@@ -327,6 +351,40 @@ export default function UserPage({ isSidebarOpen }) {
     }
     return () => unsubscribers.forEach((u) => u());
   }, [userData?.id, allRestaurants, setUserMessages, setUserOrders]);
+
+  useEffect(() => {
+    if (!deliveryAudioRef.current) return;
+
+    // Only consider orders that are completed by courier but not yet confirmed by user
+    const deliveredNeedingConfirmation = userOrders.filter(
+      (o) => o.orderCompleted === true && o.deliveryConfirmed !== true
+    );
+    const currentDeliveredIds = deliveredNeedingConfirmation.map(
+      (o) => o.orderId
+    );
+
+    // First run: initialize baseline but don't play sound
+    if (firstDeliveryCheckRef.current) {
+      prevDeliveredIdsRef.current = new Set(currentDeliveredIds);
+      firstDeliveryCheckRef.current = false;
+      return;
+    }
+
+    // Compare with previous delivered IDs
+    const prevIds = prevDeliveredIdsRef.current;
+    const newlyDeliveredIds = currentDeliveredIds.filter(
+      (id) => !prevIds.has(id)
+    );
+
+    // Play sound once if any *new* delivered orders appeared
+    if (newlyDeliveredIds.length > 0) {
+      const audio = deliveryAudioRef.current;
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    }
+
+    prevDeliveredIdsRef.current = new Set(currentDeliveredIds);
+  }, [userOrders]);
 
   // useEffect: Message listener for user
   useEffect(() => {
@@ -430,7 +488,7 @@ export default function UserPage({ isSidebarOpen }) {
   const phoneRegex = /^[0-9()+\-\s.]{7,20}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  // FUNCTION: Edit user profile details with validation 
+  // FUNCTION: Edit user profile details with validation
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
     if (!userData || savingProfile) return;
@@ -495,24 +553,36 @@ export default function UserPage({ isSidebarOpen }) {
       throw new Error("Order not found or incomplete data.");
     }
 
-    const dbTimeout = new Timestamp(newOrderTimeout.seconds, newOrderTimeout.nanoseconds);
+    const dbTimeout = new Timestamp(
+      newOrderTimeout.seconds,
+      newOrderTimeout.nanoseconds
+    );
     try {
-        const orderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);          
-        await updateDoc(orderRef, { 
-            restaurantNote: newRestaurantNote,
-            orderTimeout: dbTimeout
-        });
-        setUserOrders(prev => // update the local state with changes
-            prev.map(o => 
-                o.orderId === orderId 
-                    ? { 
-                          ...o, 
-                          restaurantNote: newRestaurantNote, 
-                          orderTimeout: dbTimeout
-                      } 
-                    : o
-            )
-        );
+      const orderRef = doc(
+        db,
+        "restaurants",
+        orderToUpdate.restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+      await updateDoc(orderRef, {
+        restaurantNote: newRestaurantNote,
+        orderTimeout: dbTimeout,
+      });
+      setUserOrders(
+        (
+          prev // update the local state with changes
+        ) =>
+          prev.map((o) =>
+            o.orderId === orderId
+              ? {
+                  ...o,
+                  restaurantNote: newRestaurantNote,
+                  orderTimeout: dbTimeout,
+                }
+              : o
+          )
+      );
     } catch (error) {
       console.error("Error sending user reply:", error);
       throw new Error("Failed to send reply to the restaurant.");
@@ -528,34 +598,59 @@ export default function UserPage({ isSidebarOpen }) {
       return;
     }
 
-    const orderToUpdate = userOrders.find(o => o.orderId === orderId); // find matching orderId
+    const orderToUpdate = userOrders.find((o) => o.orderId === orderId); // find matching orderId
     if (!orderToUpdate || !orderToUpdate.restaurantId) {
-        console.error("Order or restaurantId not found for confirmation:", orderId);
-        return;
+      console.error(
+        "Order or restaurantId not found for confirmation:",
+        orderId
+      );
+      return;
     }
 
-    const completedOrderData = { // add confirmed delivery data
-        ...orderToUpdate,
-        deliveryStatus: "Delivery confirmed.",
-        orderCompleted: true, 
-        deliveryConfirmed: true,
-        archivedAt: new Date(),
+    const completedOrderData = {
+      // add confirmed delivery data
+      ...orderToUpdate,
+      deliveryStatus: "Delivery confirmed.",
+      orderCompleted: true,
+      deliveryConfirmed: true,
+      archivedAt: new Date(),
     };
-    
+
     const batch = writeBatch(db); // create and delete order to firestore database
-    const originalOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "restaurantOrders", orderId);
-    const historyOrderRef = doc(db, "restaurants", orderToUpdate.restaurantId, "orderHistory", orderId);
+    const originalOrderRef = doc(
+      db,
+      "restaurants",
+      orderToUpdate.restaurantId,
+      "restaurantOrders",
+      orderId
+    );
+    const historyOrderRef = doc(
+      db,
+      "restaurants",
+      orderToUpdate.restaurantId,
+      "orderHistory",
+      orderId
+    );
     try {
-        batch.set(historyOrderRef, completedOrderData);
-        batch.delete(originalOrderRef);
-        await batch.commit();
-        console.log(`Order ${orderId} successfully archived and deleted from active orders.`);
-        setUserOrders(prev => prev.filter(o => o.orderId !== orderId)); // update the local state (orders) with changes
+      batch.set(historyOrderRef, completedOrderData);
+      batch.delete(originalOrderRef);
+      await batch.commit();
+      console.log(
+        `Order ${orderId} successfully archived and deleted from active orders.`
+      );
+      setUserOrders((prev) => prev.filter((o) => o.orderId !== orderId)); // update the local state (orders) with changes
     } catch (error) {
-        console.error("Confirmation/archiving failed:", error);
-        alert("Failed to confirm delivery and archive order.");
+      console.error("Confirmation/archiving failed:", error);
+      alert("Failed to confirm delivery and archive order.");
     }
   };
+
+  // Orders that have been marked delivered by courier but not yet confirmed by the user
+  const ordersNeedingConfirmation = userOrders.filter(
+    (o) => o.orderCompleted === true && o.deliveryConfirmed !== true
+  );
+
+  const pendingDeliveryCount = ordersNeedingConfirmation.length;
 
   // ERROR PREVENTION (PAGE)
   if (loading || fetchingUser || restaurantsLoading) {
@@ -575,6 +670,7 @@ export default function UserPage({ isSidebarOpen }) {
         toggleType={toggleType}
         clearTypes={clearTypes}
         isSidebarOpen={isSidebarOpen}
+        pendingDeliveryCount={pendingDeliveryCount}
       />
 
       <main className="flex-1 p-6">
