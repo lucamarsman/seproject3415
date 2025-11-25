@@ -285,12 +285,12 @@ export default function UserPage({ isSidebarOpen }) {
           if (shouldReject) {
             if (processingOrdersRef.current.has(orderId)) {
               console.log(
-                `⏩ Order ${orderId} is already being processed. Skipping re-trigger.`
+                `Order ${orderId} is already being processed. Skipping re-trigger.`
               );
               continue;
             }
             console.log(
-              `⏰ Initiating auto-reject for timed-out order ${orderId}`
+              `Initiating auto-reject for timed-out order ${orderId}`
             );
 
             processingOrdersRef.current.add(orderId);

@@ -21,23 +21,12 @@ import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
+import { getBannerUrl } from "../../utils/getBannerUrl.js";
+import { stringToColor } from "../../utils/stringToColor.js";
+
 import RestaurantCardSkeleton from "../RestaurantCardSkeleton.jsx";
 
 const db = getFirestore(); // Get firestore instance for db interactions
-
-// Hashes a string into a hex color
-const stringToColor = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  let color = "#";
-  for (let i = 0; i < 3; i++) {
-    const value = (hash >> (i * 8)) & 0xff;
-    color += ("00" + value.toString(16)).substr(-2);
-  }
-  return color;
-};
 
 // Function to generate a custom L.divIcon with a colored border
 const createBorderedRestaurantIcon = (orderId) => {
@@ -249,7 +238,7 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
         .on("routesfound", async (e) => {
           try {
             const route = e.routes[0];
-            const coords = route.coordinates; // [{lat, lng}, ...]
+            const coords = route.coordinates;
 
             await saveRouteToOrder({
               restaurantId: order.restaurantId,
@@ -623,12 +612,6 @@ export default function HomeTab({
       observer.unobserve(el);
     };
   }, [filteredRestaurants.length, visibleCount, isLoadingMore]);
-
-  function getBannerUrl(r) {
-    if (!r.bannerUrl) return null;
-    const v = r.bannerUpdatedAt || 0;
-    return v ? `${r.bannerUrl}?v=${v}` : r.bannerUrl;
-  }
 
   // Render homeTab components
   return (

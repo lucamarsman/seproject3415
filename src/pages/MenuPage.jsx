@@ -8,6 +8,7 @@ import { db } from "../firebase";
 import MenuItemCard from "../components/MenuItemCard.jsx";
 import "./MenuPage.css";
 
+// RESTAURANT MENU VIEW PAGE FOR NON-LOGGED IN USERS
 export default function MenuPage() {
     const { id: restaurantId } = useParams();
     const navigate = useNavigate();
@@ -15,11 +16,8 @@ export default function MenuPage() {
     const [restaurantData, setRestaurantData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [cart, setCart] = useState([]);
-    const addToCart = useCallback((item) => { // no cart remove?
-        setCart((prev) => [...prev, item]);
-    }, []);
 
+    // useEffect: Fetch all menu items from the selected restaurantId from Firestore database
     useEffect(() => {
         if (!restaurantId) {
             setLoading(false);
@@ -30,7 +28,6 @@ export default function MenuPage() {
         const fetchMenuAndDetails = async () => {
             setLoading(true);
             setError(null);
-
             try {
                 const restaurantDocRef = doc(db, "restaurants", restaurantId);
                 const restaurantSnapshot = await getDoc(restaurantDocRef); 
@@ -63,21 +60,21 @@ export default function MenuPage() {
         fetchMenuAndDetails();
     }, [restaurantId]);
 
+    // VARIABLE: Filters menuItems by attribute "available"
     const availableMenuItems = useMemo(() => {
         return menuItems.filter(item => item.available !== false); 
     }, [menuItems]);
+    const restaurantName = restaurantData?.storeName || "Restaurant";
 
-
+    // ERROR PREVENTION (PAGE)
     if (loading) {
         return <div className="menu-page">Loading menu...</div>;
     }
-
     if (error) {
         return <div className="menu-page error-message">Error: {error}</div>;
     }
 
-    const restaurantName = restaurantData?.storeName || "Restaurant";
-    
+    // USER INTERFACE   
     return (
         <div className="menu-page">
             <button className="back-btn" onClick={() => navigate(-1)}>
@@ -92,7 +89,6 @@ export default function MenuPage() {
                         <MenuItemCard
                             key={item.id} 
                             item={item}
-                            onAddToCart={addToCart}
                         />
                     ))
                 ) : (
