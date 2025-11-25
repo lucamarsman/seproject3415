@@ -38,6 +38,8 @@ import OrdersTabSkeleton from "../components/OrdersTabSkeleton.jsx";
 import OrderHistoryTabSkeleton from "../components/OrderHistoryTabSkeleton.jsx";
 import RestaurantSettingsTabSkeleton from "../components/RestaurantSettingsTabSkeleton.jsx";
 
+import newOrderSound from "../assets/new-order.wav"; // Sound file for notifcation
+
 // HELPER FUNCTION: populate the local state hours
 function parseHoursArray(hoursArray) {
   const result = {};
@@ -74,6 +76,17 @@ export default function RestaurantPage() {
     autoSetting: "manual",
     serviceRange: 50,
   });
+
+  // References for new order notfication sound
+  const newOrderAudioRef = useRef(null);
+  const prevPendingIdsRef = useRef(new Set());
+  const alertIntervalRef = useRef(null);
+
+  useEffect(() => {
+    const audio = new Audio(newOrderSound);
+    audio.volume = 1;
+    newOrderAudioRef.current = audio;
+  }, []);
 
   // useEffect: Authentication listener - for displaying either a new or existing account, during login
   useEffect(() => {
@@ -245,8 +258,20 @@ export default function RestaurantPage() {
     const archivedOrderIds = [];
     for (const order of oldOrdersToArchive) {
       const orderId = order.orderId;
-      const originalOrderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
-      const historyOrderRef = doc(db, "restaurants", restaurantId, "orderHistory", orderId);
+      const originalOrderRef = doc(
+        db,
+        "restaurants",
+        restaurantId,
+        "restaurantOrders",
+        orderId
+      );
+      const historyOrderRef = doc(
+        db,
+        "restaurants",
+        restaurantId,
+        "orderHistory",
+        orderId
+      );
 
       const historyData = {
         ...order,
@@ -262,7 +287,9 @@ export default function RestaurantPage() {
         prev.filter((o) => !archivedOrderIds.includes(o.orderId))
       );
       console.log(
-        `Successfully archived and deleted old orders: ${archivedOrderIds.join(", ")}`
+        `Successfully archived and deleted old orders: ${archivedOrderIds.join(
+          ", "
+        )}`
       );
     } catch (error) {
       console.error("Archiving of old orders failed:", error);
@@ -274,7 +301,12 @@ export default function RestaurantPage() {
   //                  2. Updating order status of timed out orders (rejections)
   useEffect(() => {
     if (!restaurantData?.id) return;
-    const ordersCollectionRef = collection(db, "restaurants", restaurantData.id, "restaurantOrders");
+    const ordersCollectionRef = collection(
+      db,
+      "restaurants",
+      restaurantData.id,
+      "restaurantOrders"
+    );
     let firstLoad = true;
 
     const processOrders = async (ordersArray) => {
@@ -310,7 +342,7 @@ export default function RestaurantPage() {
             }
           })
         );
-        
+
         // Calculate ETA of all active orders
         for (const order of activeOrders) {
           const courier = courierDataMap.get(order.courierId);
@@ -333,9 +365,12 @@ export default function RestaurantPage() {
           let preppedDate = new Date(now.getTime() + 5 * 60000);
           let remainingPrepDurationMinutes = 5; // Default
 
-          if (order.estimatedPreppedTime?.toDate) { // in case estimatedPreppedTime not defined or null
+          if (order.estimatedPreppedTime?.toDate) {
+            // in case estimatedPreppedTime not defined or null
             preppedDate = order.estimatedPreppedTime.toDate();
-            remainingPrepDurationMinutes = Math.max(0, Math.round((preppedDate.getTime() - now.getTime()) / 60000) // convert milliseconds to minutes
+            remainingPrepDurationMinutes = Math.max(
+              0,
+              Math.round((preppedDate.getTime() - now.getTime()) / 60000) // convert milliseconds to minutes
             );
           }
 
@@ -360,7 +395,13 @@ export default function RestaurantPage() {
           }
 
           // Update the order document with updates values
-          const orderRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", order.orderId);
+          const orderRef = doc(
+            db,
+            "restaurants",
+            restaurantData.id,
+            "restaurantOrders",
+            order.orderId
+          );
           updateBatch.update(orderRef, {
             courierLocation: courierLocation,
             courier_R_Distance: updates.C_R_distanceKm || NaN,
@@ -445,6 +486,27 @@ export default function RestaurantPage() {
       }
     };
 
+    // Helper interval functions for new order notifcation sound
+    function startRepeatingAlert() {
+      // Avoid duplicate intervals
+      if (alertIntervalRef.current) return;
+
+      alertIntervalRef.current = setInterval(() => {
+        const audio = newOrderAudioRef.current;
+        if (audio) {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+        }
+      }, 5000); // play every 5 seconds
+    }
+
+    function stopRepeatingAlert() {
+      if (alertIntervalRef.current) {
+        clearInterval(alertIntervalRef.current);
+        alertIntervalRef.current = null;
+      }
+    }
+
     // REAL-TIME LISTENER: Updates the UI/local state (setOrders) and manages loading
     const unsub = onSnapshot(
       ordersCollectionRef,
@@ -453,6 +515,36 @@ export default function RestaurantPage() {
           orderId: docSnap.id,
           ...docSnap.data(),
         }));
+
+        // Count pending orders
+        const pendingNow = fetchedOrders.filter(
+          (o) => o.orderConfirmed == null
+        );
+
+        // Detect new pending orders
+        const newPending = pendingNow.filter(
+          (o) => !prevPendingIdsRef.current.has(o.orderId)
+        );
+
+        // Update ref of known pending Ids
+        prevPendingIdsRef.current = new Set(pendingNow.map((o) => o.orderId));
+
+        // Play notification sounds when its not first load, new pending orders exist
+        if (!firstLoad && newPending.length > 0) {
+          const audio = newOrderAudioRef.current;
+          if (audio) {
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+          }
+
+          if (settings.autoSetting === "manual") {
+            startRepeatingAlert();
+          }
+        }
+
+        if (pendingNow.length === 0) {
+          stopRepeatingAlert();
+        }
 
         setOrders(fetchedOrders);
 
@@ -478,14 +570,24 @@ export default function RestaurantPage() {
     return () => {
       unsub();
       clearInterval(interval);
+      if (alertIntervalRef.current) {
+        clearInterval(alertIntervalRef.current);
+        alertIntervalRef.current = null;
+      }
     };
-  }, [restaurantData?.id]);
+  }, [restaurantData?.id, settings.autoSetting]);
 
   // FUNCTION: Case - Restaurant accepts order
   const handleConfirmOrder = async (orderId) => {
     // Get order data
     try {
-      const orderDocRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
+      const orderDocRef = doc(
+        db,
+        "restaurants",
+        restaurantData.id,
+        "restaurantOrders",
+        orderId
+      );
       let orderData = orders.find((o) => o.orderId === orderId);
       if (!orderData) {
         const orderSnap = await getDoc(orderDocRef);
@@ -496,7 +598,7 @@ export default function RestaurantPage() {
         }
         orderData = orderSnap.data();
       }
-      const totalPrepTime = orderData.totalPrepTime || 0; 
+      const totalPrepTime = orderData.totalPrepTime || 0;
 
       // 1. Update the restaurant itself: restaurants/{restaurantId} with payment data
       const restaurantRef = doc(db, "restaurants", restaurantData.id);
@@ -539,10 +641,16 @@ export default function RestaurantPage() {
     }
   };
 
-   // FUNCTION: Case - Restaurant rejects order
+  // FUNCTION: Case - Restaurant rejects order
   const handleRejectOrder = async (orderId) => {
     // Get order data
-    const orderDocRef = doc(db, "restaurants", restaurantData.id, "restaurantOrders", orderId);
+    const orderDocRef = doc(
+      db,
+      "restaurants",
+      restaurantData.id,
+      "restaurantOrders",
+      orderId
+    );
     try {
       const orderSnapshot = await getDoc(orderDocRef);
       if (!orderSnapshot.exists()) {
