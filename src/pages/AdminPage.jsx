@@ -2,6 +2,7 @@ import { useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
+// ADMIN PAGE VIEW: Under development
 export default function AdminPage() {
   const [timeoutValue, setTimeoutValue] = useState(10000); // how often the client checks for order timeout
   const [orderAutoRejectTime, setOrderAutoRejectTime] = useState(10); // after how many minutes to auto-reject an order

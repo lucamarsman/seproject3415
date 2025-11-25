@@ -3,40 +3,37 @@ import { useNavigate } from "react-router-dom";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
+// HOME VIEW PAGE - Entry url for all users (links to Login.jsx and BrowseRestaurants.jsx)
 export default function Home() {
     const navigate = useNavigate();
     const [restaurantTypes, setRestaurantTypes] = useState([]);
     const [iconMap, setIconMap] = useState({});
     const [loading, setLoading] = useState(true);
 
-    // Function to handle the navigation when the main button is clicked (no filter)
+    // FUNCTION: handles navigation when the main button is clicked (no filter)
     const handleBrowse = () => {
         navigate("/browseRestaurants");
     };
 
-    // Function to handle the click on a type card, navigating with a query parameter
+    // FUNCTION: handles the click on a type card, navigating with a query parameter
     const handleTypeClick = (type) => {
         navigate(`/browseRestaurants?type=${encodeURIComponent(type)}`);
     };
 
+    // useEffect: sets restaurant to icon type
     useEffect(() => {
         const fetchRequiredData = async () => {
             setLoading(true);
             try {
-                // 1. Fetch the unique restaurant types
-                const restaurantCollectionRef = collection(db, "restaurants");
+                const restaurantCollectionRef = collection(db, "restaurants"); // Fetch all restaurants for Firestore database
                 const restaurantSnapshot = await getDocs(restaurantCollectionRef);
-
                 const types = restaurantSnapshot.docs
                     .map((doc) => doc.data().type)
                     .filter((type) => type);
-
                 const uniqueTypes = [...new Set(types)];
                 
-                // 2. Fetch the type-icon mapping from systemFiles
-                const configRef = doc(db, "systemFiles", "systemVariables");
+                const configRef = doc(db, "systemFiles", "systemVariables"); // Fetch the type-icon mapping from systemFiles
                 const configSnap = await getDoc(configRef);
-
                 let iconLookup = {};
                 if (configSnap.exists() && Array.isArray(configSnap.data().typeIcons)) {
                     iconLookup = configSnap.data().typeIcons.reduce((acc, item) => {
@@ -47,21 +44,18 @@ export default function Home() {
                     }, {});
                 }
 
-                // Update states
-                setRestaurantTypes(uniqueTypes);
+                setRestaurantTypes(uniqueTypes); // update the local state with current restaurant.type and associated icon types
                 setIconMap(iconLookup);
-
             } catch (error) {
                 console.error("Error fetching data:", error);
             } finally {
                 setLoading(false);
             }
         };
-
         fetchRequiredData();
     }, []);
 
-    // Helper function to get the icon (defaults to a generic emoji)
+    // FUNCTION to match icon to restaurant.type
     const getIconForType = (type) => {
         return iconMap[type] || "🍽️"; // Default icon if no match is found
     };
@@ -78,7 +72,7 @@ export default function Home() {
 
             <div className="sample-restaurants">
                 {loading ? (
-                    <p>Loading restaurant categories...</p>
+                    <p></p>
                 ) : restaurantTypes.length > 0 ? (
                     restaurantTypes.map((type, index) => (
                         <button 

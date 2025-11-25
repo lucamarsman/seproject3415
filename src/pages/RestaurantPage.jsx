@@ -62,7 +62,6 @@ export default function RestaurantPage() {
   const [error, setError] = useState("");
   const [hoursState, setHoursState] = useState({});
   const [tabLoading, setTabLoading] = useState(false);
-
   // For orders
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -75,7 +74,7 @@ export default function RestaurantPage() {
     serviceRange: 50,
   });
 
-  // Auth listener
+  // useEffect: Authenticate listener - for displaying either a new or existing account, during login
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);

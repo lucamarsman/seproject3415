@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { getBannerUrl } from "../utils/getBannerUrl.js";
 import { stringToColor } from "../utils/stringToColor.js";
 
-// RESTAURANT VIEW PAGE FOR NON-LOGGED IN USERS
+// RESTAURANT VIEW PAGE - for non-logged in users
 export default function BrowseRestaurants() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

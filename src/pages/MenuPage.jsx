@@ -7,7 +7,7 @@ import {
 import { db } from "../firebase"; 
 import MenuItemCard from "../components/MenuItemCard.jsx";
 
-// RESTAURANT MENU VIEW PAGE FOR NON-LOGGED IN USERS
+// RESTAURANT MENU VIEW PAGE - for non-logged in users
 export default function MenuPage() {
     const { id: restaurantId } = useParams();
     const navigate = useNavigate();
