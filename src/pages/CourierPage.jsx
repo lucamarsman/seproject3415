@@ -1,11 +1,9 @@
-// CourierPage.jsx
 import { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { Navigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import {
   doc,
-  getDoc,
   updateDoc,
   query,
   where,
@@ -54,7 +52,10 @@ const MAX_ACCEPT_DISTANCE_METERS = 10000;
 // Dev simulator origin point (Harman's house)
 const SIM_ORIGIN = { latitude: 44.356118, longitude: -79.627597 };
 
-// Helper function that calls the public OSRM API to get a driving route between two coordinate points
+/**
+ * Calls the public OSRM API to get a driving route between two coordinate points.
+ * Returns an array of { latitude, longitude }.
+ */
 async function fetchOsrmRoute(from, to) {
   const url =
     `https://router.project-osrm.org/route/v1/driving/` +
@@ -72,7 +73,6 @@ async function fetchOsrmRoute(from, to) {
     throw new Error(data.code || "No route");
   }
 
-  // Normalize to {latitude, longitude}
   const coords = data.routes[0].geometry.coordinates;
   return coords.map(([lng, lat]) => ({
     latitude: lat,
@@ -81,7 +81,7 @@ async function fetchOsrmRoute(from, to) {
 }
 
 /**
- * Get or create route for leg:
+ * Get or create route for a given task leg:
  *  - "toRestaurant": SIM_ORIGIN -> restaurant
  *  - "toUser": restaurant -> user
  *
@@ -102,7 +102,6 @@ async function getOrCreateRouteForTaskLeg(task, leg) {
     }));
   }
 
-  // const from/to based on leg type
   const restaurantLoc = coordinateFormat(task.restaurantLocation);
   const userLoc = coordinateFormat(task.userLocation);
 
@@ -136,6 +135,7 @@ async function getOrCreateRouteForTaskLeg(task, leg) {
   let route = null;
 
   try {
+    // Try to fetch a real driving route from OSRM between from -> to
     route = await fetchOsrmRoute(from, to);
     if (!route || route.length < 2) {
       throw new Error("OSRM route too short");
@@ -205,12 +205,16 @@ export default function CourierPage() {
 
   const lastGPSRef = useRef(null);
   const movementRef = useRef({ lastMoveTime: 0 });
+
+  // Stores a movement state for the courier
   const movementStateRef = useRef("IDLE"); // IDLE | MOVING | NEAR_DESTINATION | STOPPED_TOO_LONG
-  const lastUpdateTimeRef = useRef(0); // throttle Firestore location updates
+
+  // Throttler: Stores timestamp of last Firestore location write
+  const lastUpdateTimeRef = useRef(0);
 
   // Route-based simulator refs
-  const simRouteRef = useRef(null); // [{ latitude, longitude }, ...]
-  const simRouteIndexRef = useRef(0); // current index in simRouteRef
+  const simRouteRef = useRef(null);
+  const simRouteIndexRef = useRef(0);
   const simSegmentFracRef = useRef(0);
 
   // UI movement meta: status text, ETA, last GPS update, etc.
@@ -224,7 +228,7 @@ export default function CourierPage() {
     distToUserKm: null,
   });
 
-  // Simple simulator for dev: now follows the stored route
+  // Simple simulator for devs - follows the stored route
   const [simulator, setSimulator] = useState({
     enabled: true, // dev: turn off in production
     running: false,
@@ -234,12 +238,12 @@ export default function CourierPage() {
     target: null,
   });
 
+  const simulatorIntervalRef = useRef(null);
+  const simulatorSpeedRef = useRef(30);
+
   useEffect(() => {
     simulatorSpeedRef.current = simulator.speedKmh;
   }, [simulator.speedKmh]);
-
-  const simulatorIntervalRef = useRef(null);
-  const simulatorSpeedRef = useRef(30);
 
   // Helper function to log and store movement state when it changes
   const updateMovementState = (newState) => {
@@ -260,11 +264,12 @@ export default function CourierPage() {
 
   const CURRENT_TIME_MS = Date.now();
 
-  // Helper funciton to format order timestamps
+  // Helper function to format order timestamps
   const formatOrderTimestamp = (timestamp) => {
     return timestamp?.toDate ? timestamp.toDate().toLocaleString() : "N/A";
   };
 
+  // Function that determines if a given orderTime is still in the future relative to currentTime
   const isOnTime = (currentTime, orderTime) => {
     if (!orderTime || typeof orderTime.seconds !== "number") return false;
     const orderTimeMs =
@@ -287,7 +292,6 @@ export default function CourierPage() {
     const courierDocRef = doc(db, "couriers", currentCourierId);
     try {
       await updateDoc(courierDocRef, updates);
-
       setCourierData((prev) => ({ ...prev, ...updates }));
     } catch (err) {
       console.error("Failed to update courier document:", err);
@@ -325,6 +329,7 @@ export default function CourierPage() {
     if (!user) return;
 
     const couriersRef = collection(db, "couriers");
+
     const fetchOrCreateCourier = async () => {
       try {
         const q = query(couriersRef, where("email", "==", user.email));
@@ -347,7 +352,6 @@ export default function CourierPage() {
           return;
         }
 
-        // Generate geolocation for initial profile
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const { latitude, longitude, accuracy } = position.coords;
@@ -361,7 +365,6 @@ export default function CourierPage() {
               status: "inactive",
             };
 
-            // Create the new courier doc
             const docRef = await addDoc(couriersRef, newCourier);
             await updateDoc(docRef, { courierId: docRef.id });
 
@@ -403,8 +406,8 @@ export default function CourierPage() {
   }, [user]);
 
   /**
-   * Function that updates currentTask’s ETA once the courier has picked up the order
-   *    - Writes into the order doc (and local state) using calculateEtaCourier
+   * Updates currentTask’s ETA once the courier has picked up the order.
+   * Writes into the order doc (and local state) using calculateEtaCourier.
    */
   const updateCourierTask = async (latestFormattedLocation) => {
     const task = currentTaskRef.current;
@@ -458,7 +461,6 @@ export default function CourierPage() {
       try {
         await updateDoc(orderDocRef, updates);
 
-        // Update local state
         setCurrentTask((prev) => ({
           ...prev,
           ...updates,
@@ -473,8 +475,7 @@ export default function CourierPage() {
 
   // --- GPS Throttling, Movement Analysis & Location Update ---
   useEffect(() => {
-    // Skip real GPS when simulator is enabled
-    if (simulator.enabled) return;
+    if (simulator.enabled) return; // Skip real GPS when simulator is enabled
     if (!navigator.geolocation || !courierData?.id) return;
 
     const watcher = navigator.geolocation.watchPosition(
@@ -494,11 +495,9 @@ export default function CourierPage() {
             const stoppedFor = now - (movementRef.current.lastMoveTime || now);
             if (stoppedFor > 120000) {
               updateMovementState("STOPPED_TOO_LONG");
-              // Optionally reflect this in Firestore without location spam
               updateCourierDoc({ movementFlag: movementStateRef.current });
             }
 
-            // Still update basic meta (GPS time / accuracy)
             setMovementMeta((prev) => ({
               ...prev,
               lastUpdate: now,
@@ -508,10 +507,8 @@ export default function CourierPage() {
             return;
           }
 
-          // Significant movement detected
           movementRef.current.lastMoveTime = now;
         } else {
-          // First valid location reading
           movementRef.current.lastMoveTime = now;
         }
 
@@ -547,7 +544,6 @@ export default function CourierPage() {
               }
             }
 
-            // Determine phase based on pickup and distances
             if (!task.courierPickedUp) {
               // Before pickup
               if (
@@ -587,7 +583,6 @@ export default function CourierPage() {
             console.warn("Movement analysis error:", e);
           }
         } else {
-          // No active task
           phaseLabel = "Available for tasks";
           updateMovementState("IDLE");
         }
@@ -598,7 +593,6 @@ export default function CourierPage() {
         // Throttle Firestore updates to ~1.5s minimum interval
         const sinceLastUpdate = now - (lastUpdateTimeRef.current || 0);
         if (sinceLastUpdate < 1500) {
-          // Even if we don't write to Firestore, still update meta in UI
           const distUserKm =
             typeof distToUserMeters === "number"
               ? distToUserMeters / 1000
@@ -619,7 +613,7 @@ export default function CourierPage() {
           let etaMinutes = null;
           if (task && task.courierPickedUp && distToUserMeters != null) {
             const distKm = distToUserMeters / 1000;
-            const assumedSpeed = 30; // km/h
+            const assumedSpeed = 30;
             etaMinutes = Math.max(1, Math.round((distKm / assumedSpeed) * 60));
           }
 
@@ -657,7 +651,6 @@ export default function CourierPage() {
         // Update task ETA (Firestore) if applicable
         updateCourierTask(newLoc);
 
-        // Update UI movement meta
         const distUserKm =
           typeof distToUserMeters === "number" ? distToUserMeters / 1000 : null;
         const distRestKm =
@@ -676,7 +669,7 @@ export default function CourierPage() {
         let etaMinutes = null;
         if (task && task.courierPickedUp && distToUserMeters != null) {
           const distKm = distToUserMeters / 1000;
-          const assumedSpeed = 30; // km/h
+          const assumedSpeed = 30;
           etaMinutes = Math.max(1, Math.round((distKm / assumedSpeed) * 60));
         }
 
@@ -705,7 +698,6 @@ export default function CourierPage() {
     if (!simulator.enabled || !simulator.running) return;
     if (!courierData?.id) return;
 
-    // Clear previous interval before creating a new one
     if (simulatorIntervalRef.current) {
       clearInterval(simulatorIntervalRef.current);
     }
@@ -726,7 +718,7 @@ export default function CourierPage() {
 
         const end = route[route.length - 1];
 
-        // If at or beyond the last point, treat as arrival
+        // Arrival at final point
         if (idx >= route.length - 1) {
           const pos = { ...end, timestamp: Date.now() };
           lastGPSRef.current = pos;
@@ -755,8 +747,8 @@ export default function CourierPage() {
 
         // Metric movement logic along route
         const speedKmh = simulator.speedKmh || 30;
-        const mps = (speedKmh * 1000) / 3600; // km/h -> m/s
-        const dt = simulator.stepMs / 1000; // ms -> sec
+        const mps = (speedKmh * 1000) / 3600;
+        const dt = simulator.stepMs / 1000;
         let moveMeters = mps * dt;
 
         // Segment skipping - move across multiple segments if needed
@@ -768,11 +760,9 @@ export default function CourierPage() {
           const distRemaining = segmentMeters * (1 - frac);
 
           if (moveMeters < distRemaining) {
-            // Stay on this segment
             frac += moveMeters / segmentMeters;
             moveMeters = 0;
           } else {
-            // Finish this segment and move to next
             moveMeters -= distRemaining;
             idx++;
             frac = 0;
@@ -793,7 +783,6 @@ export default function CourierPage() {
 
         const newPos = { latitude: lat, longitude: lng, timestamp: Date.now() };
 
-        // Push GPS update
         lastGPSRef.current = newPos;
         updateMovementState(
           idx >= route.length - 1 ? "NEAR_DESTINATION" : "MOVING"
@@ -810,11 +799,9 @@ export default function CourierPage() {
         // Remaining distance to end of route (for ETA)
         let remMeters = 0;
         if (idx < route.length - 1) {
-          // Add remaining full segments
           for (let i = idx; i < route.length - 1; i++) {
             remMeters += metersBetween(route[i], route[i + 1]);
           }
-          // Subtract the fractional part already traveled
           const segMeters = metersBetween(A, B);
           remMeters -= segMeters * frac;
         }
@@ -825,7 +812,6 @@ export default function CourierPage() {
             ? Math.max(1, Math.round((remKm / speedKmh) * 60))
             : null;
 
-        // Update UI
         setMovementMeta((prev) => ({
           ...prev,
           lastUpdate: Date.now(),
@@ -862,6 +848,7 @@ export default function CourierPage() {
   useEffect(() => {
     if (!courierData?.id) return;
     const ref = doc(db, "couriers", courierData.id);
+
     const unsub = onSnapshot(ref, (snap) => {
       safeWrap(() => {
         if (snap.exists()) {
@@ -893,6 +880,8 @@ export default function CourierPage() {
   }, [courierData?.currentTask]);
 
   /* --- REALTIME AVAILABLE ORDERS LISTENER (Phase 3) --- */
+
+  // Stores unsubscribe functions for each restaurant’s orders listener
   const [restaurantListeners, setRestaurantListeners] = useState([]);
 
   useEffect(() => {
@@ -1082,7 +1071,6 @@ export default function CourierPage() {
     }
 
     if (task.courierPickedUp) {
-      // Already picked up
       return;
     }
 
@@ -1110,7 +1098,6 @@ export default function CourierPage() {
 
       await updateDoc(orderRef, updates);
 
-      // Update local state copy of the task
       const updatedTask = { ...task, ...updates };
       setCurrentTask((prev) =>
         prev && prev.orderId === orderId ? updatedTask : prev
@@ -1136,7 +1123,6 @@ export default function CourierPage() {
           const origin = route[0];
           lastGPSRef.current = { ...origin, timestamp: Date.now() };
 
-          // Keep courier doc in sync
           await updateCourierDoc({
             location: origin,
             movementFlag: "MOVING",
@@ -1187,6 +1173,7 @@ export default function CourierPage() {
 
     try {
       const batch = writeBatch(db);
+
       const orderRef = doc(
         db,
         "restaurants",
@@ -1214,7 +1201,7 @@ export default function CourierPage() {
         earnings: increment(paymentCourier),
       });
 
-      // --- SEND Message to Customer ---
+      // Send message to customer
       await addDoc(userRef, {
         createdAt: Timestamp.fromDate(new Date()),
         message: `Order ${orderId} from ${
@@ -1307,7 +1294,7 @@ export default function CourierPage() {
   if (loadingAuth) return <div>Loading authentication...</div>;
   if (!user) return <Navigate to="/login" />;
 
-  //COMPONENT UI
+  // COMPONENT UI
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <header className="mb-6">
@@ -1404,7 +1391,7 @@ export default function CourierPage() {
                   value={simulator.speedKmh}
                   onChange={(e) => {
                     const val = Number(e.target.value) || 0;
-                    simulatorSpeedRef.current = val; // keep ref in sync
+                    simulatorSpeedRef.current = val;
                     setSimulator((prev) => ({
                       ...prev,
                       speedKmh: val,
