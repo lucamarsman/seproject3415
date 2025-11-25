@@ -16,6 +16,10 @@ import AdminPage from "./pages/AdminPage";
 import OrderPage from "./pages/OrderPage";
 import BrowseRestaurants from "./pages/BrowseRestaurants";
 import MenuPage from "./pages/MenuPage";
+import BecomeACustomer from "./pages/BecomeACustomer";
+import BecomeARestaurant from "./pages/BecomeARestaurant";
+import BecomeACourier from "./pages/BecomeACourier";
+import SignUp from "./pages/SignUp";
 
 import "leaflet/dist/leaflet.css";
 
@@ -51,6 +55,10 @@ function App() {
           />
           <Route path="/browseRestaurants" element={<BrowseRestaurants />} />
           <Route path="/browseRestaurants/:id/menu" element={<MenuPage />} />
+          <Route path="/become-a-customer" element={<BecomeACustomer />} />
+          <Route path="/become-a-restaurant" element={<BecomeARestaurant />} />
+          <Route path="/become-a-courier" element={<BecomeACourier />} />
+          <Route path="/signup" element={<SignUp onSelectRole={setRole} />} />
         </Routes>
 
         <Footer />

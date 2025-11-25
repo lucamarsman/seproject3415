@@ -236,7 +236,7 @@ export default function NavBar({
                   ))}
                 </ul>
               )}
-              <Link to="/login" className="ghost-btn">
+              <Link to="/signup" className="ghost-btn">
                 Sign up
               </Link>
             </div>
