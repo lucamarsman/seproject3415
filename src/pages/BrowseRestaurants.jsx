@@ -58,7 +58,7 @@ export default function BrowseRestaurants() {
 
   // ERROR PREVENTION (PAGE)
   if (loading) {
-    return <div className="p-10 text-center text-lg text-gray-700">Loading restaurants...</div>;
+    return <div className="p-10 text-center text-lg text-gray-700"></div>;
   }
   if (error) {
     return <div className="p-10 text-center text-lg text-red-600 font-medium">Error: {error}</div>;
