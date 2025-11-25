@@ -1,12 +1,5 @@
-// HomeTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import {
-  getFirestore,
-  doc,
-  getDoc,
-  updateDoc,
-  onSnapshot,
-} from "firebase/firestore";
+import { getFirestore, doc, updateDoc, onSnapshot } from "firebase/firestore";
 import {
   MapContainer,
   TileLayer,
@@ -88,7 +81,7 @@ function saveRouteToOrder({ restaurantId, orderId, routeType, coordinates }) {
   });
 }
 
-/** --- OrderDeliveryPath - Road-following routes + live courier dot ---
+/** OrderDeliveryPath - Road-following routes and live courier dot
  * Subscribes to live courier locations, computes OSRM routes if missing from firestore, renders the route polyline and courier dot on the map
  */
 function OrderDeliveryPath({ activeOrders, userLatLng }) {
