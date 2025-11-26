@@ -31,6 +31,7 @@ export default function OrderPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedModifications, setSelectedModifications] = useState({});
   const [restaurantNote, setRestaurantNote] = useState([]);
+  const [cartItems, setCartItems] = useState([]);
   
   // useEffect: Authentication listener - users that are not logged in cannot access this page (redirected to Login page)
   useEffect(() => {
@@ -61,21 +62,17 @@ export default function OrderPage() {
     }
   }, [restaurant, navigate]);
 
-  // useEffect: Calculate total order price
+  // useEffect: Calculate total order price; and recalculate total when cartItems change
   useEffect(() => {
     if (!restaurant?.menu) return;
-    let newTotal = 0;
-    restaurant.menu.forEach((item, index) => {
-      if (item.available) {
-        const qty = quantities[index] || 0;
-        newTotal += item.price * qty; // add base item price to total
-        const mods = selectedModifications[index] || [];
-        const modsTotal = mods.reduce((modAcc, mod) => modAcc + mod.price, 0);
-        newTotal += modsTotal * qty; // add item modification price to total
-      }
-    });
+    let newTotal = cartItems.reduce((acc, item) => {
+        const itemPrice = item.price;
+        const modsPrice = item.selectedMods.reduce((modAcc, mod) => modAcc + mod.price, 0);
+        return acc + (itemPrice + modsPrice) * item.quantity;
+    }, 0);
+
     setTotal(newTotal);
-  }, [quantities, restaurant, selectedModifications]);
+  }, [cartItems, selectedTipPercentage, restaurant]);
 
   // useEffect: Recalculate tip when total changes
   useEffect(() => {
@@ -126,6 +123,45 @@ export default function OrderPage() {
     });
   };
 
+  // NEW FUNCTION: Handles adding an item to the cart
+  const handleAddToCart = (index) => {
+    const qty = quantities[index] || 0;
+    const item = restaurant.menu[index];
+
+    if (qty <= 0) {
+        alert("Please select a quantity greater than zero.");
+        return;
+    }
+
+    const newItem = {
+        name: item.name,
+        quantity: qty,
+        price: item.price,
+        prepTime: item.prepTime || 0,
+        selectedMods: selectedModifications[index] || [],
+    };
+
+    setCartItems(prev => [...prev, newItem]);
+    
+    // Clear temporary selection states
+    setQuantities(prev => {
+        const newQuantities = { ...prev };
+        delete newQuantities[index];
+        return newQuantities;
+    });
+    setSelectedModifications(prev => {
+        const newMods = { ...prev };
+        delete newMods[index];
+        return newMods;
+    });
+  };
+
+  // FUNCTION: Removes an item from the cart
+  const handleRemoveFromCart = (cartIndex) => {
+    setCartItems(prev => prev.filter((_, i) => i !== cartIndex));
+  };
+
+
   // FUNCTION: Updates the 0th element of the restaurantNote array
   const handleGlobalNoteChange = (e) => {
     const newNote = e.target.value;
@@ -148,14 +184,14 @@ export default function OrderPage() {
 
   // FUNCTION: Calculates and sets the customer tip based on selected percentage
   const handleTipPercentageChange = (percentage) => {
-    const rate = parseFloat(percentage); // This will be 0.0, 0.10, 0.15, etc.
+    const rate = parseFloat(percentage);
     setSelectedTipPercentage(rate);
 
     if (rate > 0) {
       const calculatedTip = total * rate;
-      handleTipChange(calculatedTip.toFixed(2)); // Use toFixed(2) for precision
+      handleTipChange(calculatedTip.toFixed(2));
     } else {
-      handleTipChange(0); // "No tip" or 0%
+      handleTipChange(0);
     }
   };
 
@@ -188,8 +224,8 @@ export default function OrderPage() {
       setIsSubmitting(false);
       return;
     }
-    if (total === 0) {
-      alert("Please add at least one item to your order.");
+    if (cartItems.length === 0) {
+      alert("Please add at least one item to your cart before submitting.");
       setIsSubmitting(false);
       return;
     }
@@ -198,7 +234,7 @@ export default function OrderPage() {
     const commissionAmount = total * PLATFORM_COMMISSION_RATE;
     const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
     const paymentRestaurant = total - commissionAmount;
-    const paymentCourier  = COURIER_BASE_PAY + customerTip;
+    const paymentCourier  = COURIER_BASE_PAY + customerTip;
     const paymentPlatform = commissionAmount - COURIER_BASE_PAY;
 
     //3. Create the order
@@ -216,18 +252,14 @@ export default function OrderPage() {
       const currentTotalOrders = restaurantData.totalOrders || 0;
       const orderId = `${restaurantId}_${currentTotalOrders}`;
 
-      // 3A: Set newOrder.items into Firestore database format: array/map
-      const items = Object.entries(quantities)
-        .filter(([index, qty]) => qty > 0 && restaurant.menu[index])
-        .map(([index, qty]) => {
-          const itemIndex = parseInt(index, 10);
-          return {
-              name: restaurant.menu[itemIndex].name,
-              quantity: qty,
-              prepTime: restaurant.menu[itemIndex].prepTime || 0,
-              selectedMods: selectedModifications[itemIndex] || [], 
-          }
-        });
+      // 3A: Set newOrder.items into Firestore database format: array/map - use cartItems directly
+      const items = cartItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        prepTime: item.prepTime,
+        selectedMods: item.selectedMods,
+      }));
+
 
       // 3B: Calculate the newOrder.totalPrepTime value
       const totalPrepTime = items.reduce(
@@ -240,7 +272,6 @@ export default function OrderPage() {
       const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 60000);
 
       // 3D: Set the newOrder fields with appropriate values
-      // Removed fields: courierArray: [], courierRejectArray: [], estimatedDeliveryTime: null, estimatedPickUpTime: null, confirmedTime: null, deliveryConfirmed: false,
       const newOrder = {
         createdAt: createdAt,
         courierConfirmed: false,
@@ -337,6 +368,9 @@ export default function OrderPage() {
           e.preventDefault();
           handleSubmitOrder();
         }}>
+          
+          {/* 1. MENU ITEMS (Input Section) */}
+          <h2 className="text-xl font-bold mt-2 mb-4">Menu Items</h2>
           <ul className="space-y-4">
             {restaurant.menu.map((item, index) => {
               if (!item.available) return null;
@@ -363,7 +397,7 @@ export default function OrderPage() {
                     <p className="text-sm text-gray-500">Calories: {item.calories}</p>
                     <p className="text-sm font-medium mb-2">${item.price.toFixed(2)}</p>
 
-                    {/* MODIFICATIONS (Options) SECTION */}
+                    {/* OPTIONS SECTION */}
                     {hasModifications && (
                         <div className={`mt-2 p-3 border rounded-md ${currentQuantity > 0 ? 'bg-gray-50' : 'bg-gray-200'} transition-colors`}>
                             <h4 className="text-sm font-semibold mb-2 text-gray-700">Select Options:</h4>
@@ -385,23 +419,70 @@ export default function OrderPage() {
                         </div>
                     )}
                     
-                    {/* QUANTITY INPUT */}
-                    <input
-                      type="number"
-                      min="0"
-                      className="w-24 border px-2 py-1 rounded"
-                      value={quantities[index] || ""}
-                      onChange={(e) => handleQuantityChange(index, e.target.value)}
-                      placeholder="Qty"
-                    />
+                    {/* QUANTITY INPUT AND ADD TO CART BUTTON */}
+                    <div className="flex items-center space-x-2 mt-2">
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-20 border px-2 py-1 rounded"
+                          value={quantities[index] || ""}
+                          onChange={(e) => handleQuantityChange(index, e.target.value)}
+                          placeholder="Qty"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => handleAddToCart(index)}
+                            disabled={currentQuantity === 0}
+                            className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                                currentQuantity > 0 ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            }`}
+                        >
+                            Add to Cart
+                        </button>
+                  </div>
                   </div>
                 </li>
               );
             })}
           </ul>
 
-          {/* GLOBAL ORDER NOTES SECTION */}
-          <div className="mt-8 p-4 border rounded-md bg-white shadow-md">
+          {/* 2. CART SUMMARY SECTION */}
+          <div className="mt-8 p-4 border rounded-md bg-yellow-50 shadow-md">
+            <h3 className="text-lg font-bold mb-3 flex items-center">
+                🛒 Your Cart ({cartItems.length} items)
+            </h3>
+            {cartItems.length === 0 ? (
+                <p className="text-gray-600 italic">Your cart is empty. Add items from the menu above.</p>
+            ) : (
+                <ul className="space-y-3">
+                    {cartItems.map((item, cartIndex) => (
+                        <li key={cartIndex} className="text-sm border-b pb-2 flex justify-between items-start">
+                            <div className='flex-1 pr-2'>
+                                <p className="font-semibold">{item.quantity}x {item.name}</p>
+                                {item.selectedMods.length > 0 && (
+                                    <p className="text-xs text-gray-600 ml-2">
+                                        Options: {item.selectedMods.map(mod => mod.name).join(', ')}
+                                    </p>
+                                )}
+                            </div>
+                            <div className='flex-shrink-0 text-right'>
+                                <p className="font-medium">${(item.quantity * (item.price + item.selectedMods.reduce((a, b) => a + b.price, 0))).toFixed(2)}</p>
+                                <button 
+                                    type="button" 
+                                    onClick={() => handleRemoveFromCart(cartIndex)}
+                                    className="text-xs text-red-500 hover:text-red-700 mt-1"
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+          </div>
+
+          {/* 3. GLOBAL ORDER NOTES SECTION */}
+          <div className="mt-4 p-4 border rounded-md bg-white shadow-md">
             <h3 className="text-lg font-semibold mb-3">Order Notes</h3>
             
             <div className="mb-4">
@@ -412,12 +493,12 @@ export default function OrderPage() {
                     className="w-full border px-3 py-2 rounded text-sm resize-none"
                     placeholder="If filled, order acceptance at restaurant discretion."
                     value={restaurantNote[0] || ""}
-                    onChange={handleGlobalNoteChange}          
+                    onChange={handleGlobalNoteChange}          
                 />
             </div>
           </div>
           
-          {/* PAYMENT SECTION WITH TIP DROPDOWN */}
+          {/* 4. PAYMENT SECTION WITH TIP DROPDOWN */}
           <div className="mt-6 p-4 border rounded-md bg-white shadow-md">
             <h3 className="text-lg font-semibold mb-3">Payment Summary</h3>
             <div className="space-y-1">
@@ -456,8 +537,8 @@ export default function OrderPage() {
             <div className="mt-4 text-right">
               <button
                 type="submit"
-                className={`w-full bg-green-600 text-white px-4 py-3 rounded-md text-lg font-semibold transition-colors ${isSubmitting || total === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
-                disabled={isSubmitting || total === 0}
+                className={`w-full bg-green-600 text-white px-4 py-3 rounded-md text-lg font-semibold transition-colors ${isSubmitting || cartItems.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
+                disabled={isSubmitting || cartItems.length === 0}
               >
                 {isSubmitting ? "Submitting..." : `Pay & Submit $${(total + customerTip).toFixed(2)}`}
               </button>
