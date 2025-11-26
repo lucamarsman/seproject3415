@@ -1250,47 +1250,6 @@ export default function CourierPage() {
     }
   };
 
-  // UI Helpers
-  const renderStatusChip = () => {
-    const status = courierData?.status || "inactive";
-    const movement = courierData?.movementFlag || "IDLE";
-
-    let label = "Offline";
-    let bg = "bg-gray-100";
-    let text = "text-gray-700";
-    let dot = "bg-gray-400";
-
-    if (status === "active") {
-      if (movement === "MOVING" || movement === "NEAR_DESTINATION") {
-        label = "Active · On the move";
-        bg = "bg-green-50";
-        text = "text-green-800";
-        dot = "bg-green-500";
-      } else {
-        label = "Active · Idle";
-        bg = "bg-amber-50";
-        text = "text-amber-800";
-        dot = "bg-amber-500";
-      }
-    } else {
-      if (movement === "STOPPED_TOO_LONG") {
-        label = "Inactive · Stopped too long";
-        bg = "bg-red-50";
-        text = "text-red-800";
-        dot = "bg-red-500";
-      }
-    }
-
-    return (
-      <div
-        className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${bg} ${text}`}
-      >
-        <span className={`w-2 h-2 rounded-full ${dot}`} />
-        <span>{label}</span>
-      </div>
-    );
-  };
-
   if (loadingAuth) return <div>Loading authentication...</div>;
   if (!user) return <Navigate to="/login" />;
 
@@ -1306,8 +1265,6 @@ export default function CourierPage() {
         </h1>
 
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-gray-700">
-          {courierData && renderStatusChip()}
-
           {movementMeta.phase && (
             <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
               <span className="w-2 h-2 rounded-full bg-blue-400 mr-2" />
@@ -1317,7 +1274,7 @@ export default function CourierPage() {
 
           {movementMeta.etaMinutes && currentTask && (
             <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">
-              ETA to customer: ~{movementMeta.etaMinutes} min
+              ETA: ~{movementMeta.etaMinutes} min
             </span>
           )}
 
