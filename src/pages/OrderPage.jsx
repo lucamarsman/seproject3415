@@ -123,7 +123,7 @@ export default function OrderPage() {
     });
   };
 
-  // NEW FUNCTION: Handles adding an item to the cart
+  // FUNCTION: Handles adding an item to the cart
   const handleAddToCart = (index) => {
     const qty = quantities[index] || 0;
     const item = restaurant.menu[index];
@@ -157,10 +157,50 @@ export default function OrderPage() {
   };
 
   // FUNCTION: Removes an item from the cart
-  const handleRemoveFromCart = (cartIndex) => {
-    setCartItems(prev => prev.filter((_, i) => i !== cartIndex));
+  const handleRemoveFromCart = (groupedItem) => {
+      // 1. Create the unique key for the item to remove
+      const sortedModNames = groupedItem.selectedMods
+          .map(mod => mod.name)
+          .sort()
+          .join('|');
+      const uniqueKeyToRemove = `${groupedItem.name}-${sortedModNames}`;
+      
+      // 2. Filter the raw cartItems array keeping non-matching item
+      setCartItems(prev => prev.filter(item => {
+          const currentSortedModNames = item.selectedMods
+              .map(mod => mod.name)
+              .sort()
+              .join('|');
+          const currentUniqueKey = `${item.name}-${currentSortedModNames}`;
+          
+          return currentUniqueKey !== uniqueKeyToRemove;
+      }));
   };
 
+  const groupCartItems = (rawCartItems) => {
+    const groupedItemsMap = new Map();
+    rawCartItems.forEach(item => {
+        const sortedModNames = item.selectedMods
+            .map(mod => mod.name)
+            .sort()
+            .join('|');
+        const uniqueKey = `${item.name}-${sortedModNames}`;
+
+        if (groupedItemsMap.has(uniqueKey)) {
+            const existingItem = groupedItemsMap.get(uniqueKey);
+            existingItem.quantity += item.quantity;
+            existingItem.totalPrice += (item.quantity * (item.price + item.selectedMods.reduce((a, b) => a + b.price, 0)));
+        } else {
+            groupedItemsMap.set(uniqueKey, {
+                ...item,
+                unitPriceWithMods: item.price + item.selectedMods.reduce((a, b) => a + b.price, 0),
+                totalPrice: (item.quantity * (item.price + item.selectedMods.reduce((a, b) => a + b.price, 0)))
+            });
+        }
+    });
+    return Array.from(groupedItemsMap.values());
+  };
+  const groupedCartItems = groupCartItems(cartItems);
 
   // FUNCTION: Updates the 0th element of the restaurantNote array
   const handleGlobalNoteChange = (e) => {
@@ -172,7 +212,7 @@ export default function OrderPage() {
     });
   };
 
-  // FUNCTION: Updates the customerTip state directly (used by handleTipPercentageChange)
+  // FUNCTION: Updates the customerTip state directly
   const handleTipChange = (value) => {
     const tip = parseFloat(value);
     if (!isNaN(tip) && tip >= 0) {
@@ -252,14 +292,13 @@ export default function OrderPage() {
       const currentTotalOrders = restaurantData.totalOrders || 0;
       const orderId = `${restaurantId}_${currentTotalOrders}`;
 
-      // 3A: Set newOrder.items into Firestore database format: array/map - use cartItems directly
-      const items = cartItems.map(item => ({
+      // 3A: Set newOrder.items into Firestore database format: array/map
+      const items = groupedCartItems.map(item => ({
         name: item.name,
         quantity: item.quantity,
-        prepTime: item.prepTime,
+        prepTime: item.prepTime || 0,
         selectedMods: item.selectedMods,
       }));
-
 
       // 3B: Calculate the newOrder.totalPrepTime value
       const totalPrepTime = items.reduce(
@@ -369,7 +408,7 @@ export default function OrderPage() {
           handleSubmitOrder();
         }}>
           
-          {/* 1. MENU ITEMS (Input Section) */}
+          {/* 1. MENU ITEMS */}
           <h2 className="text-xl font-bold mt-2 mb-4">Menu Items</h2>
           <ul className="space-y-4">
             {restaurant.menu.map((item, index) => {
@@ -446,42 +485,42 @@ export default function OrderPage() {
             })}
           </ul>
 
-          {/* 2. CART SUMMARY SECTION */}
+          {/* 2. CART SUMMARY */}
           <div className="mt-8 p-4 border rounded-md bg-yellow-50 shadow-md">
-            <h3 className="text-lg font-bold mb-3 flex items-center">
-                🛒 Your Cart ({cartItems.length} items)
-            </h3>
-            {cartItems.length === 0 ? (
-                <p className="text-gray-600 italic">Your cart is empty. Add items from the menu above.</p>
-            ) : (
-                <ul className="space-y-3">
-                    {cartItems.map((item, cartIndex) => (
-                        <li key={cartIndex} className="text-sm border-b pb-2 flex justify-between items-start">
-                            <div className='flex-1 pr-2'>
-                                <p className="font-semibold">{item.quantity}x {item.name}</p>
-                                {item.selectedMods.length > 0 && (
-                                    <p className="text-xs text-gray-600 ml-2">
-                                        Options: {item.selectedMods.map(mod => mod.name).join(', ')}
-                                    </p>
-                                )}
-                            </div>
-                            <div className='flex-shrink-0 text-right'>
-                                <p className="font-medium">${(item.quantity * (item.price + item.selectedMods.reduce((a, b) => a + b.price, 0))).toFixed(2)}</p>
-                                <button 
-                                    type="button" 
-                                    onClick={() => handleRemoveFromCart(cartIndex)}
-                                    className="text-xs text-red-500 hover:text-red-700 mt-1"
-                                >
-                                    Remove
-                                </button>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
-            )}
+              <h3 className="text-lg font-bold mb-3 flex items-center">
+                  🛒 Your Cart ({cartItems.reduce((sum, item) => sum + item.quantity, 0)} items total)
+              </h3>
+              {groupedCartItems.length === 0 ? (
+                  <p className="text-gray-600 italic">Your cart is empty. Add items from the menu above.</p>
+              ) : (
+                  <ul className="space-y-3">
+                      {groupedCartItems.map((item, cartIndex) => (
+                          <li key={item.name + item.selectedMods.map(m => m.name).join('')} className="text-sm border-b pb-2 flex justify-between items-start">
+                              <div className='flex-1 pr-2'>
+                                  <p className="font-semibold">{item.quantity}x {item.name}</p>
+                                  {item.selectedMods.length > 0 && (
+                                      <p className="text-xs text-gray-600 ml-2">
+                                          Options: {item.selectedMods.map(mod => mod.name).join(', ')}
+                                      </p>
+                                  )}
+                              </div>
+                              <div className='flex-shrink-0 text-right'>
+                                  <p className="font-medium">${item.totalPrice.toFixed(2)}</p>
+                                  <button 
+                                      type="button" 
+                                      onClick={() => handleRemoveFromCart(item)}
+                                      className="text-xs text-red-500 hover:text-red-700 mt-1"
+                                  >
+                                      Remove All
+                                  </button>
+                              </div>
+                          </li>
+                      ))}
+                  </ul>
+              )}
           </div>
 
-          {/* 3. GLOBAL ORDER NOTES SECTION */}
+          {/* 3. ORDER NOTES */}
           <div className="mt-4 p-4 border rounded-md bg-white shadow-md">
             <h3 className="text-lg font-semibold mb-3">Order Notes</h3>
             
@@ -498,7 +537,7 @@ export default function OrderPage() {
             </div>
           </div>
           
-          {/* 4. PAYMENT SECTION WITH TIP DROPDOWN */}
+          {/* 4. PAYMENT */}
           <div className="mt-6 p-4 border rounded-md bg-white shadow-md">
             <h3 className="text-lg font-semibold mb-3">Payment Summary</h3>
             <div className="space-y-1">
@@ -515,7 +554,7 @@ export default function OrderPage() {
                         value={selectedTipPercentage}
                         onChange={(e) => handleTipPercentageChange(e.target.value)}
                     >
-                        <option value={0}>No Tip (Default)</option>
+                        <option value={0}>No Tip</option>
                         <option value={0.10}>10% Tip</option>
                         <option value={0.15}>15% Tip</option>
                         <option value={0.20}>20% Tip</option>

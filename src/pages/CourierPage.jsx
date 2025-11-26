@@ -1143,13 +1143,20 @@ export default function CourierPage() {
     }
   };
 
+  // FUNCTION: Formats the order items into a message on delivery by courier
   const formatItemsForMessage = (items) => {
     if (!Array.isArray(items) || items.length === 0) return "your order items";
-
     const formattedItems = items
-      .map((item) => `${item.quantity}x ${item.name}`)
+      .map((item) => {
+        const hasMods = Array.isArray(item.selectedMods) && item.selectedMods.length > 0;
+        let modString = "";
+        if (hasMods) {
+          const modNames = item.selectedMods.map(mod => mod.name).join(', ');
+          modString = ` (${modNames})`;
+        }
+        return `${item.quantity}x ${item.name}${modString}`;
+      })
       .join(", ");
-
     return formattedItems;
   };
 
