@@ -1224,9 +1224,9 @@ export default function CourierPage() {
       await batch.commit();
 
       setCurrentTask(null);
+      // Update the local state view
       setCourierData((prev) => ({
         ...prev,
-        earnings: (prev.earnings || 0) + paymentCourier,
         currentTask: "",
         currentRestaurant: "",
       }));

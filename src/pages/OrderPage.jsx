@@ -3,11 +3,12 @@ import { onAuthStateChanged, getAuth } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, Timestamp, increment } from "firebase/firestore";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { coordinateFormat } from "../utils/coordinateFormat.js";
+
+import { coordinateFormat } from "../utils/coordinateFormat.js"; // utils
 import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../utils/isRestaurantAcceptingOrders.js";
 
-import defaultImage from "../assets/defaultImgUrl.png";
+import defaultImage from "../assets/defaultImgUrl.png"; // assets
 
 const DEFAULT_IMAGE_URL = defaultImage;
 const PLATFORM_COMMISSION_RATE = 0.25;
@@ -22,6 +23,7 @@ export default function OrderPage() {
   const [quantities, setQuantities] = useState({});
   const [total, setTotal] = useState(0);
   const [customerTip, setCustomerTip] = useState(0);
+  const [selectedTipPercentage, setSelectedTipPercentage] = useState(0);
   const [userId, setUserId] = useState(null);
   const [userData, setUserData] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -74,6 +76,11 @@ export default function OrderPage() {
     });
     setTotal(newTotal);
   }, [quantities, restaurant, selectedModifications]);
+
+  // useEffect: Recalculate tip when total changes
+  useEffect(() => {
+    handleTipPercentageChange(selectedTipPercentage);
+  }, [total, selectedTipPercentage]);
 
   // FUNCTION: Sets item quantity and item modification quantity to a value in local state
   const handleQuantityChange = (index, value) => {
@@ -129,13 +136,26 @@ export default function OrderPage() {
     });
   };
 
-  // FUNCTION: Adds tip to the total payment value
+  // FUNCTION: Updates the customerTip state directly (used by handleTipPercentageChange)
   const handleTipChange = (value) => {
     const tip = parseFloat(value);
     if (!isNaN(tip) && tip >= 0) {
       setCustomerTip(tip);
     } else if (value === "") {
       setCustomerTip(0);
+    }
+  };
+
+  // FUNCTION: Calculates and sets the customer tip based on selected percentage
+  const handleTipPercentageChange = (percentage) => {
+    const rate = parseFloat(percentage); // This will be 0.0, 0.10, 0.15, etc.
+    setSelectedTipPercentage(rate);
+
+    if (rate > 0) {
+      const calculatedTip = total * rate;
+      handleTipChange(calculatedTip.toFixed(2)); // Use toFixed(2) for precision
+    } else {
+      handleTipChange(0); // "No tip" or 0%
     }
   };
 
@@ -174,7 +194,7 @@ export default function OrderPage() {
       return;
     }
 
-    //2. Payment division to platform, restaurant, and courier
+    //2. Payment division to platform, restaurant, and courier 
     const commissionAmount = total * PLATFORM_COMMISSION_RATE;
     const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
     const paymentRestaurant = total - commissionAmount;
@@ -200,13 +220,13 @@ export default function OrderPage() {
       const items = Object.entries(quantities)
         .filter(([index, qty]) => qty > 0 && restaurant.menu[index])
         .map(([index, qty]) => {
-            const itemIndex = parseInt(index, 10);
-            return {
-                name: restaurant.menu[itemIndex].name,
-                quantity: qty,
-                prepTime: restaurant.menu[itemIndex].prepTime || 0,
-                selectedMods: selectedModifications[itemIndex] || [], 
-            }
+          const itemIndex = parseInt(index, 10);
+          return {
+              name: restaurant.menu[itemIndex].name,
+              quantity: qty,
+              prepTime: restaurant.menu[itemIndex].prepTime || 0,
+              selectedMods: selectedModifications[itemIndex] || [], 
+          }
         });
 
       // 3B: Calculate the newOrder.totalPrepTime value
@@ -233,7 +253,7 @@ export default function OrderPage() {
         orderConfirmed: null, // need this null
         orderId,
         orderTimeout: orderTimeout,
-        payment: total,
+        payment: total + customerTip,
         paymentCourier: paymentCourier ,
         paymentPlatform: paymentPlatform,
         paymentRestaurant: paymentRestaurant,
@@ -259,7 +279,7 @@ export default function OrderPage() {
       // 3F: Redirect to UserPage after to order
       navigate("/user", {
         state: {
-          total,
+          total: total + customerTip,
           restaurantName: restaurant.storeName,
           items,
         },
@@ -392,19 +412,56 @@ export default function OrderPage() {
                     className="w-full border px-3 py-2 rounded text-sm resize-none"
                     placeholder="If filled, order acceptance at restaurant discretion."
                     value={restaurantNote[0] || ""}
-                    onChange={handleGlobalNoteChange}                />
+                    onChange={handleGlobalNoteChange}          
+                />
             </div>
           </div>
-          {/* PAYMENT SECTION */}
+          
+          {/* PAYMENT SECTION WITH TIP DROPDOWN */}
+          <div className="mt-6 p-4 border rounded-md bg-white shadow-md">
+            <h3 className="text-lg font-semibold mb-3">Payment Summary</h3>
+            <div className="space-y-1">
+                <div className="flex justify-between">
+                    <span className="text-gray-700">Subtotal:</span>
+                    <span className="font-medium">${total.toFixed(2)}</span>
+                </div>
 
-          <div className="mt-6 text-right">
-            <p className="text-lg font-bold mb-2">Total: ${total.toFixed(2)}</p>
-            <button
-              type="submit"
-              className="bg-green-600 text-white px-4 py-2 rounded"
-            >
-              Pay & Submit
-            </button>
+                <div className="flex justify-between items-center py-2 border-t border-b">
+                    <label htmlFor="tip-select" className="text-gray-700">Add Tip:</label>
+                    <select
+                        id="tip-select"
+                        className="border px-2 py-1 rounded text-sm"
+                        value={selectedTipPercentage}
+                        onChange={(e) => handleTipPercentageChange(e.target.value)}
+                    >
+                        <option value={0}>No Tip (Default)</option>
+                        <option value={0.10}>10% Tip</option>
+                        <option value={0.15}>15% Tip</option>
+                        <option value={0.20}>20% Tip</option>
+                        <option value={0.25}>25% Tip</option>
+                    </select>
+                </div>
+
+                <div className="flex justify-between">
+                    <span className="text-gray-700">Courier Tip:</span>
+                    <span className="font-medium">${customerTip.toFixed(2)}</span>
+                </div>
+                
+                <div className="flex justify-between pt-2">
+                    <p className="text-xl font-bold">Grand Total:</p>
+                    <p className="text-xl font-bold text-green-700">${(total + customerTip).toFixed(2)}</p>
+                </div>
+            </div>
+            
+            <div className="mt-4 text-right">
+              <button
+                type="submit"
+                className={`w-full bg-green-600 text-white px-4 py-3 rounded-md text-lg font-semibold transition-colors ${isSubmitting || total === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
+                disabled={isSubmitting || total === 0}
+              >
+                {isSubmitting ? "Submitting..." : `Pay & Submit $${(total + customerTip).toFixed(2)}`}
+              </button>
+            </div>
           </div>
         </form>
       )}
