@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  updateDoc,
+  onSnapshot,
+} from "firebase/firestore";
 import {
   MapContainer,
   TileLayer,
@@ -9,53 +15,40 @@ import {
   Polyline,
 } from "react-leaflet";
 import L from "leaflet";
+import "leaflet-routing-machine";
+import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
 import { Circle, CircleMarker } from "react-leaflet";
 import { isRestaurantOpenToday } from "../../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../../utils/isRestaurantAcceptingOrders.js";
+import { getBannerUrl } from "../../utils/getBannerUrl.js";
+import { stringToColor } from "../../utils/stringToColor.js";
+
 import RestaurantCardSkeleton from "../RestaurantCardSkeleton.jsx";
 
-const stringToColor = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  let color = "#";
-  for (let i = 0; i < 3; i++) {
-    const value = (hash >> (i * 8)) & 0xff;
-    color += ("00" + value.toString(16)).substr(-2);
-  }
-  return color;
-};
+const db = getFirestore(); // Get firestore instance for db interactions
 
 // Function to generate a custom L.divIcon with a colored border
 const createBorderedRestaurantIcon = (orderId) => {
   const borderColor = stringToColor(orderId);
   const html = `
         <div style="
-            /* The overall size of the visible marker including the border: 40px */
             width: 40px; 
             height: 40px;
-            
-            /* Apply border and white background to the outer container */
             border: 4px solid ${borderColor}; 
             border-radius: 50%;
             background-color: transparent; 
             box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-            
-            /* Center the 32x32 image visually inside the 40x40 border area */
             display: flex;
             justify-content: center;
             align-items: center;
         ">
             <img 
                 src="https://cdn-icons-png.flaticon.com/512/1046/1046784.png" 
-                /* Set the image back to its explicit size */
                 style="width: 32px; height: 32px; border-radius: 50%;"
             />
         </div>
     `;
 
-  // Total visible size is 40x40.
   const size = 40;
   const borderThickness = 4;
 
@@ -68,9 +61,41 @@ const createBorderedRestaurantIcon = (orderId) => {
   });
 };
 
-// --- OrderDeliveryPath - Polyline using real-time courier updates ---
+// Function that saves routes from OSRM to firestore
+function saveRouteToOrder({ restaurantId, orderId, routeType, coordinates }) {
+  if (!restaurantId || !orderId || !Array.isArray(coordinates)) return;
+
+  const orderRef = doc(
+    db,
+    "restaurants",
+    restaurantId,
+    "restaurantOrders",
+    orderId
+  );
+
+  // Normalize leaflet's { lat, long } to firestore schema { Latitude, Longitude }
+  const normalized = coordinates.map((c) => ({
+    latitude: c.lat,
+    longitude: c.lng,
+  }));
+
+  const field =
+    routeType === "toRestaurant" ? "routeToRestaurant" : "routeToUser";
+
+  return updateDoc(orderRef, {
+    [field]: normalized,
+  });
+}
+
+/** OrderDeliveryPath - Road-following routes and live courier dot
+ * Subscribes to live courier locations, computes OSRM routes if missing from firestore, renders the route polyline and courier dot on the map
+ */
 function OrderDeliveryPath({ activeOrders, userLatLng }) {
   const [liveCourierLocations, setLiveCourierLocations] = useState({});
+  const map = useMap();
+  const routingControlsRef = useRef({});
+
+  // Orders that have a courier assigned + confirmed
   const confirmedOrders = useMemo(() => {
     return Object.values(activeOrders)
       .flat()
@@ -83,76 +108,269 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
       );
   }, [activeOrders]);
 
+  /** useEffect that subscribes to live courier location updates for all confirmed orders
+   * When confirmedOrders changes:
+   *   - A firestore onSnapshot listener is attached for each courierId
+   *   - The latest {lat, long} is stored in liveCourierLocations
+   *   - All listeners are unsubscribed on cleanup
+   */
   useEffect(() => {
-    const courierIds = confirmedOrders.map((order) => order.courierId);
-    const uniqueCourierIds = [...new Set(courierIds)];
+    // reset map of listeners
+    const unsubscribes = [];
 
-    const fetchCourierLocation = async (courierId) => {
-      try {
-        const db = getFirestore();
-        const docRef = doc(db, "couriers", courierId);
-        const docSnap = await getDoc(docRef);
-        const fetchedData = docSnap.exists() ? docSnap.data()?.location : null;
-        if (fetchedData && fetchedData.latitude && fetchedData.longitude) {
-          setLiveCourierLocations((prev) => ({
-            ...prev,
-            [courierId]: {
-              latitude: fetchedData.latitude,
-              longitude: fetchedData.longitude,
-            },
-          }));
-        }
-      } catch (error) {
-        console.error(
-          "Error fetching courier location for ID:",
-          courierId,
-          error
-        );
-      }
-    };
-    const updateAllCouriers = () => {
-      uniqueCourierIds.forEach(fetchCourierLocation);
-    };
-    updateAllCouriers();
-    const intervalId = setInterval(updateAllCouriers, 5000);
-    return () => clearInterval(intervalId);
+    confirmedOrders.forEach((order) => {
+      if (!order.courierId) return;
+
+      const courierRef = doc(db, "couriers", order.courierId);
+
+      const unsub = onSnapshot(
+        courierRef,
+        (snap) => {
+          const data = snap.data();
+          if (data?.location?.latitude && data?.location?.longitude) {
+            setLiveCourierLocations((prev) => ({
+              ...prev,
+              [order.courierId]: {
+                latitude: data.location.latitude,
+                longitude: data.location.longitude,
+              },
+            }));
+          }
+        },
+        (err) => console.error("Live courier listener error:", err)
+      );
+
+      unsubscribes.push(unsub);
+    });
+
+    return () => unsubscribes.forEach((u) => u());
   }, [confirmedOrders]);
 
+  /** useEffect that builds OSRM routes for confirmed orders and persists them to Firestore.
+   *   - Clears existing routing controls from the map
+   *   - For each confirmed order:
+   *        Skip OSRM if the appropriate route is already stored
+   *        Otherwise, call OSRM to compute courier to restaurant or courier to user
+   *        When route is found, save it to Firestore
+   *   - Cleans up all routing controls when dependencies change or component unmounts
+   */
+  useEffect(() => {
+    if (!map) return;
+    if (!userLatLng) return;
+
+    // Clean up any existing routing controls
+    Object.values(routingControlsRef.current).forEach((ctrl) => {
+      try {
+        map.removeControl(ctrl);
+      } catch (e) {
+        console.warn("Failed to remove routing control", e);
+      }
+    });
+    routingControlsRef.current = {};
+
+    // For each confirmed order, either build route or skip OSRM if route exists
+    confirmedOrders.forEach((order) => {
+      const restaurantLoc = order.restaurantLocation;
+      const initialCourierLoc = order.courierLocation;
+
+      // Both courier and restaurant coordinates are required to build a route
+      if (
+        !initialCourierLoc?.latitude ||
+        !initialCourierLoc?.longitude ||
+        !restaurantLoc?.latitude ||
+        !restaurantLoc?.longitude
+      ) {
+        return;
+      }
+
+      const pathColor = stringToColor(order.orderId);
+
+      const hasRouteToRestaurant =
+        Array.isArray(order.routeToRestaurant) &&
+        order.routeToRestaurant.length > 1;
+      const hasRouteToUser =
+        Array.isArray(order.routeToUser) && order.routeToUser.length > 1;
+
+      // If we already have a stored route, don't call OSRM
+      if (!order.courierPickedUp && hasRouteToRestaurant) {
+        return;
+      }
+      if (order.courierPickedUp && hasRouteToUser) {
+        return;
+      }
+
+      // Else, compute the missing leg via OSRM
+      const courierLatLng = L.latLng(
+        initialCourierLoc.latitude,
+        initialCourierLoc.longitude
+      );
+      const restaurantLatLng = L.latLng(
+        restaurantLoc.latitude,
+        restaurantLoc.longitude
+      );
+      const userLatLngLL = L.latLng(userLatLng[0], userLatLng[1]);
+
+      const waypoints = order.courierPickedUp
+        ? [courierLatLng, userLatLngLL] // after pickup: courier to user
+        : [courierLatLng, restaurantLatLng]; // before pickup: courier to restaurant
+
+      const control = L.Routing.control({
+        waypoints,
+        router: L.Routing.osrmv1({
+          serviceUrl: "https://router.project-osrm.org/route/v1",
+        }),
+        addWaypoints: false,
+        draggableWaypoints: false,
+        fitSelectedRoutes: false,
+        show: false,
+        lineOptions: {
+          styles: [
+            {
+              color: pathColor,
+              weight: 2,
+              opacity: 0.8,
+            },
+          ],
+        },
+        createMarker: () => null,
+      })
+        .on("routesfound", async (e) => {
+          try {
+            const route = e.routes[0];
+            const coords = route.coordinates;
+
+            await saveRouteToOrder({
+              restaurantId: order.restaurantId,
+              orderId: order.orderId,
+              routeType: order.courierPickedUp ? "toUser" : "toRestaurant",
+              coordinates: coords,
+            });
+          } catch (err) {
+            console.error("Failed to save route to Firestore:", err);
+          }
+        })
+        .on("routingerror", (err) => {
+          console.warn("OSRM routing error in HomeTab:", err);
+        })
+        .addTo(map);
+
+      routingControlsRef.current[order.orderId] = control;
+    });
+
+    // Remove all routing controls from the map on cleanup
+    return () => {
+      Object.values(routingControlsRef.current).forEach((ctrl) => {
+        try {
+          map.removeControl(ctrl);
+        } catch (e) {
+          console.warn("Failed to remove routing control", e);
+        }
+      });
+      routingControlsRef.current = {};
+    };
+  }, [map, confirmedOrders, userLatLng]);
+
+  // Render stored OSRM routes and live courier dot
   return (
     <>
       {confirmedOrders.map((order) => {
-        const restaurantCoords = [order.restaurantLocation.latitude, order.restaurantLocation.longitude];
-        const userCoords = userLatLng;
-        const liveLocation = liveCourierLocations[order.courierId] || order.courierLocation;
-        const courierCoords = [liveLocation.latitude, liveLocation.longitude];
         const pathColor = stringToColor(order.orderId);
-        
-        const polylinePositions = order.courierPickedUp
-            ? [courierCoords, userCoords]
-            : [courierCoords, restaurantCoords, userCoords];
-            
+
+        // Draw stored route if available
+        let routeCoords = null;
+        if (
+          !order.courierPickedUp &&
+          Array.isArray(order.routeToRestaurant) &&
+          order.routeToRestaurant.length > 1
+        ) {
+          routeCoords = order.routeToRestaurant.map((p) => [
+            p.latitude,
+            p.longitude,
+          ]);
+        } else if (
+          order.courierPickedUp &&
+          Array.isArray(order.routeToUser) &&
+          order.routeToUser.length > 1
+        ) {
+          routeCoords = order.routeToUser.map((p) => [p.latitude, p.longitude]);
+        }
+
         return (
           <React.Fragment key={order.orderId}>
-            {
-              <Polyline
-                positions={polylinePositions}
-                pathOptions={{
-                  color: pathColor,
-                  weight: 2,
-                  dashArray: "10, 5",
-                }}
-              />
-            }
-            <CircleMarker
-              center={courierCoords}
-              radius={6}
-              pathOptions={{
-                color: pathColor,
-                fillColor: pathColor,
-                fillOpacity: 1,
-                weight: 2,
-              }}
-            />
+            {(() => {
+              if (!routeCoords) return null;
+
+              const liveLocation =
+                liveCourierLocations[order.courierId] || order.courierLocation;
+
+              // If we don't know where the courier is, draw full route
+              if (!liveLocation?.latitude || !liveLocation?.longitude) {
+                return (
+                  <Polyline
+                    positions={routeCoords}
+                    pathOptions={{
+                      color: pathColor,
+                      weight: 2,
+                      opacity: 0.9,
+                    }}
+                  />
+                );
+              }
+
+              // Find the closest point on the route to the courier
+              let closestIndex = 0;
+              let closestDistSq = Infinity;
+
+              routeCoords.forEach(([lat, lng], idx) => {
+                const dLat = lat - liveLocation.latitude;
+                const dLng = lng - liveLocation.longitude;
+                const distSq = dLat * dLat + dLng * dLng;
+
+                if (distSq < closestDistSq) {
+                  closestDistSq = distSq;
+                  closestIndex = idx;
+                }
+              });
+
+              // Slice route so everything behind the courier is removed
+              const futureRoute = routeCoords.slice(closestIndex);
+
+              return (
+                <Polyline
+                  positions={futureRoute}
+                  pathOptions={{
+                    color: pathColor,
+                    weight: 2,
+                    opacity: 0.9,
+                  }}
+                />
+              );
+            })()}
+
+            {/* Draw live courier dot */}
+            {(() => {
+              const liveLocation =
+                liveCourierLocations[order.courierId] || order.courierLocation;
+              if (!liveLocation?.latitude || !liveLocation?.longitude) {
+                return null;
+              }
+              const courierCoords = [
+                liveLocation.latitude,
+                liveLocation.longitude,
+              ];
+              return (
+                <CircleMarker
+                  center={courierCoords}
+                  radius={3}
+                  pathOptions={{
+                    color: pathColor,
+                    fillColor: pathColor,
+                    fillOpacity: 1,
+                    weight: 1,
+                  }}
+                />
+              );
+            })()}
           </React.Fragment>
         );
       })}
@@ -160,6 +378,7 @@ function OrderDeliveryPath({ activeOrders, userLatLng }) {
   );
 }
 
+// Function that keeps the map centered on a provided position and respects a locally stored zoom level
 function MapSetTo({ position }) {
   const map = useMap();
   useEffect(() => {
@@ -172,6 +391,7 @@ function MapSetTo({ position }) {
   return null;
 }
 
+// Function that converts a zoom level to a search radius in km
 function zoomLevelToKm(zoom) {
   const zoomToKm = {
     8: 100,
@@ -190,6 +410,11 @@ function zoomLevelToKm(zoom) {
   return Math.min(radius, 100);
 }
 
+/** Function that observes zoom changes on the map and:
+ *   - Converts zoom level to search radius
+ *   - Updates search radius state
+ *   - Stores zoom level in local storage
+ */
 function ZoomToRadius({ setSearchRadius, setMapInstance }) {
   const map = useMap();
   useEffect(() => {
@@ -207,6 +432,11 @@ function ZoomToRadius({ setSearchRadius, setMapInstance }) {
   return null;
 }
 
+/** Function that fits the map view to contain all markers as long as:
+ *   - There are are least two markers present
+ *   - There is no lcoally saved zoom level
+ *   - The map hasn't been initialized
+ */
 function FitBoundsView({ markers }) {
   const map = useMap();
   const [hasFit, setHasFit] = useState(false);
@@ -220,14 +450,7 @@ function FitBoundsView({ markers }) {
   return null;
 }
 
-function formatTime(timeStr) {
-  if (!timeStr || timeStr.length !== 4) return "Invalid";
-  const hours = timeStr.slice(0, 2);
-  const minutes = timeStr.slice(2);
-  return `${hours}:${minutes}`;
-}
-
-// Leaflet default icon fix + custom restaurant icon
+// Leaflet default icon fix and custom restaurant icon
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -238,6 +461,7 @@ L.Icon.Default.mergeOptions({
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
+// Default restuarant icon for restuarants with no active orders
 const restaurantIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/1046/1046784.png",
   iconSize: [32, 32],
@@ -249,16 +473,29 @@ const restaurantIcon = new L.Icon({
   shadowAnchor: [13, 41],
 });
 
+/**
+ * Main UserPage tab that shows:
+ *   - The map with user location, radius, restaurants, and active deliveries
+ *   - A list of restaurants that match current filters & radius
+ *
+ * Props:
+ *   - userLatLng: [lat, lng]
+ *   - filteredRestaurants: Restaurant[] (after search, type filters, radius)
+ *   - restaurantsWithActiveOrders: { [restaurantId: string]: Order[] }
+ *   - searchTerm, setSearchTerm: search text + setter
+ *   - filters, setFilters, clearTypes, toggleType: filter controls
+ *   - searchRadius: current radius in km (derived from map zoom)
+ *   - currentDateTime: Date or timestamp for open/closed calculations
+ *   - navigate: from react-router, used to open restaurant order pages
+ *   - setMapInstance: callback to give parent the Leaflet map
+ *   - setSearchRadius: set radius when zoom changes
+ */
 export default function HomeTab({
   userLatLng,
   filteredRestaurants = [],
   restaurantsWithActiveOrders = {},
   searchTerm,
-  setSearchTerm,
   filters,
-  setFilters,
-  clearTypes,
-  toggleType,
   searchRadius,
   currentDateTime,
   navigate,
@@ -266,174 +503,143 @@ export default function HomeTab({
   setSearchRadius,
 }) {
   const BATCH_SIZE = 10;
+
+  // How many restaurants are currently visible in the list (used for infinite scroll effect)
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
+
+  // DOM ref (used for infinite scroll effect)
   const loadMoreRef = useRef(null);
 
+  // Reset visibleCount when filters or search change
   useEffect(() => {
     setVisibleCount(BATCH_SIZE);
   }, [filteredRestaurants, searchTerm, filters]);
 
-  const visibleRestaurants = useMemo(() => 
-   filteredRestaurants.slice(0, visibleCount),
-   [filteredRestaurants, visibleCount]
+  // Slice filteredRestaurants so it only shows visibleCount entries
+  const visibleRestaurants = useMemo(
+    () => filteredRestaurants.slice(0, visibleCount),
+    [filteredRestaurants, visibleCount]
+  );
+
+  // Restaurants to show on the map = filtered ones and any with active orders
+  const restaurantsOnMap = useMemo(() => {
+    const byId = new Map();
+
+    // Start with filtered restaurants (distance and filters)
+    filteredRestaurants.forEach((r) => {
+      if (!r?.id) return;
+      byId.set(r.id, r);
+    });
+
+    // Add restaurants that have active orders (even if they're not in filteredRestaurants)
+    Object.entries(restaurantsWithActiveOrders || {}).forEach(
+      ([restaurantId, orders]) => {
+        if (!orders || orders.length === 0) return;
+        if (byId.has(restaurantId)) return;
+
+        const firstOrder = orders[0];
+
+        // Use location from order if restaurant not already in filtered list
+        const loc = firstOrder.restaurantLocation;
+        if (!loc?.latitude || !loc?.longitude) return;
+
+        byId.set(restaurantId, {
+          id: restaurantId,
+          restaurantId: restaurantId,
+          storeName: firstOrder.restaurantName || "Active order restaurant",
+          address: firstOrder.restaurantAddress || "",
+          location: {
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+          },
+          // flag so we can show a note in popup (future)
+          _outsideRadius: true,
+        });
+      }
+    );
+
+    return Array.from(byId.values());
+  }, [filteredRestaurants, restaurantsWithActiveOrders]);
+
+  // Flatten active orders (For use in UI)
+  const flatActiveOrders = useMemo(
+    () =>
+      Object.values(restaurantsWithActiveOrders || {})
+        .flat()
+        .filter((o) => o.orderConfirmed && !o.orderCompleted),
+    [restaurantsWithActiveOrders]
   );
 
   const shouldFitBounds = filteredRestaurants.length > 0;
-  const resultLabel = `${filteredRestaurants.length} ${
-    filteredRestaurants.length === 1 ? "result" : "results"
-  }`;
 
+  // Markers used for initial fitBounds (user and all restaurantsOnMap)
   const markers = useMemo(
     () => [
       userLatLng,
-      ...filteredRestaurants
+      ...restaurantsOnMap
         .filter((r) => r?.location?.latitude && r?.location?.longitude)
         .map((r) => [r.location.latitude, r.location.longitude]),
     ],
-    [userLatLng, filteredRestaurants]
+    [userLatLng, restaurantsOnMap]
   );
 
+  // Used to show skeleton cards while loading
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Infinite scroll observer
   useEffect(() => {
-  if (!loadMoreRef.current) return;
-  if (filteredRestaurants.length <= visibleCount) return; // nothing more to load
+    if (!loadMoreRef.current) return;
+    if (filteredRestaurants.length <= visibleCount) return;
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const entry = entries[0];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
 
-      // only trigger when fully in view and not already loading
-      if (entry.isIntersecting && !isLoadingMore) {
-        setIsLoadingMore(true);
+        if (entry.isIntersecting && !isLoadingMore) {
+          setIsLoadingMore(true);
 
-        // artifical delay for ux example
-        setTimeout(() => {
-          setVisibleCount((prev) =>
-            Math.min(prev + BATCH_SIZE, filteredRestaurants.length)
-          );
-          setIsLoadingMore(false);
-        }, 600); // tweak delay if you want
+          setTimeout(() => {
+            setVisibleCount((prev) =>
+              Math.min(prev + BATCH_SIZE, filteredRestaurants.length)
+            );
+            setIsLoadingMore(false);
+          }, 600); // artificial network delay to show skeletons
+        }
+      },
+      {
+        root: null,
+        rootMargin: "0px",
+        threshold: 1.0,
       }
-    },
-    {
-      root: null,
-      rootMargin: "0px", 
-      threshold: 1.0,   
+    );
+
+    const el = loadMoreRef.current;
+    observer.observe(el);
+
+    return () => {
+      observer.unobserve(el);
+    };
+  }, [filteredRestaurants.length, visibleCount, isLoadingMore]);
+
+  // Helper for active order UI
+  const getOrderLegendStatus = (order) => {
+    if (order.courierPickedUp) {
+      // courier has the food, going to user
+      return "Courier heading to user";
     }
-  );
 
-  const el = loadMoreRef.current;
-  observer.observe(el);
+    if (order.courierConfirmed) {
+      // courier accepted but hasn't picked up yet
+      return "Courier heading to restaurant";
+    }
 
-  return () => {
-    observer.unobserve(el);
+    // restaurant has confirmed, no courier yet
+    return "Confirmed by restaurant";
   };
-}, [filteredRestaurants.length, visibleCount, isLoadingMore]);
 
-
-
-  function getBannerUrl(r) {
-    if (!r.bannerUrl) return null;
-    const v = r.bannerUpdatedAt || 0;
-    return v ? `${r.bannerUrl}?v=${v}` : r.bannerUrl;
-  }
-
+  // Render homeTab components
   return (
     <>
-      <div className="sticky top-0 z-10 bg-white/80 rounded-md p-4 shadow-sm mb-4">
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-          <div className="flex-1 flex flex-col sm:flex-row sm:items-end gap-4">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by name or address…"
-                className="w-full pl-10 pr-3 py-2 rounded-md border focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <svg
-                className="absolute left-3 bottom-2.5 w-5 h-5 text-gray-400"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"
-                />
-              </svg>
-            </div>
-
-            <div className="inline-flex items-center gap-2 shrink-0">
-              <label className="text-sm font-medium text-gray-600 whitespace-nowrap m-0">
-                Sort by:
-              </label>
-              <select
-                id="sortBy"
-                value={filters.sort}
-                onChange={(e) =>
-                  setFilters((f) => ({ ...f, sort: e.target.value }))
-                }
-                className="border rounded-md py-2 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="distance">Distance</option>
-                <option value="rating">Rating</option>
-                <option value="name">Name (A→Z)</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col">
-              <label className="block text-sm font-medium text-gray-600 mb-1">
-                Availability
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  checked={filters.openNow}
-                  onChange={(e) =>
-                    setFilters((f) => ({ ...f, openNow: e.target.checked }))
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                Open now
-              </label>
-            </div>
-          </div>
-
-          <div
-            className="flex-none w-28 text-right text-sm text-gray-500 self-end tabular-nums select-none"
-            aria-live="polite"
-          >
-            {resultLabel}
-          </div>
-        </div>
-
-        {filters.types.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            {filters.types.map((t) => (
-              <button
-                key={t}
-                onClick={() => toggleType(t)}
-                className="px-2.5 py-1 rounded-full border text-xs bg-blue-50 border-blue-200 text-blue-700 cursor-pointer"
-                title="Remove filter"
-              >
-                {t} ×
-              </button>
-            ))}
-            <button
-              onClick={clearTypes}
-              className="text-xs text-blue-700 hover:underline cursor-pointer"
-            >
-              Clear all
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Map */}
       <div className="w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm mt-4 mb-4">
         <div className="h-72 md:h-80 lg:h-96 relative">
@@ -455,7 +661,7 @@ export default function HomeTab({
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* NEW: Component to draw the delivery path */}
+            {/* Delivery routes and live courier marker */}
             <OrderDeliveryPath
               activeOrders={restaurantsWithActiveOrders}
               userLatLng={userLatLng}
@@ -489,7 +695,7 @@ export default function HomeTab({
               </>
             )}
 
-            {filteredRestaurants
+            {restaurantsOnMap
               .filter((r) => r?.location?.latitude && r?.location?.longitude)
               .map((r) => {
                 const activeOrders = restaurantsWithActiveOrders[r.id];
@@ -512,12 +718,21 @@ export default function HomeTab({
                       <div className="text-sm text-gray-600 mt-1">
                         {typeof r.distance === "number"
                           ? `${r.distance.toFixed(2)} km away`
+                          : r._outsideRadius
+                          ? "Outside current search radius"
                           : ""}
                       </div>
+
                       {activeOrders && activeOrders.length > 0 && (
                         <div className="mt-2 text-sm font-medium text-green-700">
                           {activeOrders.length} Active Order
                           {activeOrders.length > 1 ? "s" : ""}
+                        </div>
+                      )}
+
+                      {r._outsideRadius && !activeOrders && (
+                        <div className="mt-1 text-xs text-gray-500">
+                          (Shown because of previous activity)
                         </div>
                       )}
                     </Popup>
@@ -525,6 +740,44 @@ export default function HomeTab({
                 );
               })}
           </MapContainer>
+          {flatActiveOrders.length > 0 && (
+            <div className="pointer-events-none absolute top-2 right-2 z-[1000]">
+              <div className="bg-white/90 rounded-lg shadow px-2 py-1 max-h-32 overflow-y-auto min-w-[190px] pointer-events-auto">
+                <p className="text-[10px] font-semibold text-gray-700 mb-1">
+                  Active orders
+                </p>
+
+                <ul className="space-y-1">
+                  {flatActiveOrders.map((order) => (
+                    <li
+                      key={`${order.restaurantId}__${order.orderId}`}
+                      className="flex items-start gap-2 text-[10px]"
+                    >
+                      <span
+                        className="mt-[3px] w-2 h-2 rounded-full flex-shrink-0"
+                        style={{
+                          backgroundColor: stringToColor(order.orderId),
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="truncate font-medium">
+                            {order.storeName ||
+                              order.restaurantName ||
+                              `Order ${order.orderId.slice(0, 6)}`}
+                          </span>
+                        </div>
+
+                        <div className="text-[10px] text-gray-600">
+                          {getOrderLegendStatus(order)}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <h2 className="mt-8 text-xl">
@@ -547,7 +800,13 @@ export default function HomeTab({
                   state: { restaurant: r },
                 });
               }}
-              className="flex flex-col h-full text-left border rounded-lg shadow-sm bg-white hover:shadow-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer overflow-hidden"
+              className="
+    flex flex-col h-full text-left border rounded-lg bg-white shadow-sm
+    transition-all duration-200 transform
+    hover:scale-[1.02] hover:shadow-lg
+    focus:outline-none focus:ring-2 focus:ring-blue-500
+    cursor-pointer overflow-hidden
+  "
             >
               <div className="relative w-full aspect-[5/1] bg-gray-100 overflow-hidden">
                 {getBannerUrl(r) ? (
@@ -584,7 +843,7 @@ export default function HomeTab({
                     <span className="shrink-0 text-sm font-medium">
                       {r.rating ?? "N/A"}★
                     </span>
-                    </div>
+                  </div>
 
                   <p className="mt-1 text-sm text-gray-700">{r.address}</p>
 
@@ -603,9 +862,12 @@ export default function HomeTab({
                       </span>
                       <span className="ml-2 text-sm text-gray-500">
                         {(() => {
-                          const dayName = new Date().toLocaleDateString("en-US", {
-                            weekday: "long",
-                          });
+                          const dayName = new Date().toLocaleDateString(
+                            "en-US",
+                            {
+                              weekday: "long",
+                            }
+                          );
                           const todayHours = r.hours.find(
                             (entry) => entry[dayName]
                           );
@@ -631,18 +893,15 @@ export default function HomeTab({
           {isLoadingMore &&
             Array.from({ length: 4 }).map((_, idx) => (
               <RestaurantCardSkeleton key={`skeleton-${idx}`} />
-          ))}
-
+            ))}
         </div>
-        
       )}
-          {visibleRestaurants.length < filteredRestaurants.length && (
-            <div
-              ref={loadMoreRef}
-              className="py-4 text-center text-sm text-gray-500"
-            >
-            </div>
-          )}
+      {visibleRestaurants.length < filteredRestaurants.length && (
+        <div
+          ref={loadMoreRef}
+          className="py-4 text-center text-sm text-gray-500"
+        ></div>
+      )}
     </>
   );
 }

@@ -62,7 +62,7 @@ export default function Sidebar({
 }) {
     return (
         <aside
-            className="w-52 bg-gray-50 border-r border-gray-300 p-4 sticky top-0 h-screen" 
+            className="w-52 bg-gray-50 border-r border-gray-300 p-4 sticky top-16 h-screen" 
             aria-label="Restaurant Manager Navigation"
         >
             <h3 className="text-sm font-semibold uppercase text-gray-500 mb-3 ml-2">Navigation</h3>

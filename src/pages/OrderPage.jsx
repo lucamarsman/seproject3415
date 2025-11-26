@@ -3,37 +3,36 @@ import { onAuthStateChanged, getAuth } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, Timestamp, increment } from "firebase/firestore";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { coordinateFormat } from "../utils/coordinateFormat.js";
+
+import { coordinateFormat } from "../utils/coordinateFormat.js"; // utils
 import { isRestaurantOpenToday } from "../utils/isRestaurantOpenToday.js";
 import { isRestaurantAcceptingOrders } from "../utils/isRestaurantAcceptingOrders.js";
 
-import defaultImage from "../assets/defaultImgUrl.png";
+import defaultImage from "../assets/defaultImgUrl.png"; // assets
 
 const DEFAULT_IMAGE_URL = defaultImage;
 const PLATFORM_COMMISSION_RATE = 0.25;
 const COURIER_SHARE_OF_COMMISSION = 0.5;
 
+// ORDER PAGE - for logged in users after selecting a restaurant in UserPage/homeTab.jsx
 export default function OrderPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { restaurantId } = useParams();
   const restaurant = location.state?.restaurant;
-  
-  // Existing state
   const [quantities, setQuantities] = useState({});
   const [total, setTotal] = useState(0);
   const [customerTip, setCustomerTip] = useState(0);
+  const [selectedTipPercentage, setSelectedTipPercentage] = useState(0);
   const [userId, setUserId] = useState(null);
   const [userData, setUserData] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [userDataLoaded, setUserDataLoaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // State for modifications
   const [selectedModifications, setSelectedModifications] = useState({});
   const [restaurantNote, setRestaurantNote] = useState([]);
   
-  // SINGLE auth listener
+  // useEffect: Authentication listener - users that are not logged in cannot access this page (redirected to Login page)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(getAuth(), async (user) => {
       setAuthChecked(true);
@@ -52,46 +51,42 @@ export default function OrderPage() {
       }
       setUserDataLoaded(true);
     });
-
     return () => unsubscribe();
   }, [navigate]);
 
-  // Redirect if no restaurant
+  // useEffect: Redirect to UserPage if invalid restaurant url
   useEffect(() => {
     if (!restaurant) {
       navigate("/user");
     }
   }, [restaurant, navigate]);
 
-  // Calculate total price (Includes modifications)
+  // useEffect: Calculate total order price
   useEffect(() => {
     if (!restaurant?.menu) return;
-    
     let newTotal = 0;
-    
     restaurant.menu.forEach((item, index) => {
       if (item.available) {
         const qty = quantities[index] || 0;
-        
-        // 1. Add base price
-        newTotal += item.price * qty;
-
-        // 2. Add modification prices
+        newTotal += item.price * qty; // add base item price to total
         const mods = selectedModifications[index] || [];
         const modsTotal = mods.reduce((modAcc, mod) => modAcc + mod.price, 0);
-        newTotal += modsTotal * qty;
+        newTotal += modsTotal * qty; // add item modification price to total
       }
     });
-    
-    setTotal(newTotal);//divide this up into // paymentCourier , // paymentPlatform , //paymentRestaurant
+    setTotal(newTotal);
   }, [quantities, restaurant, selectedModifications]);
 
+  // useEffect: Recalculate tip when total changes
+  useEffect(() => {
+    handleTipPercentageChange(selectedTipPercentage);
+  }, [total, selectedTipPercentage]);
 
+  // FUNCTION: Sets item quantity and item modification quantity to a value in local state
   const handleQuantityChange = (index, value) => {
     const qty = parseInt(value, 10);
     if (isNaN(qty) || qty < 0) return;
     
-    // Reset selections if quantity drops to 0 or below
     if (qty <= 0) {
         setQuantities((prev) => {
             const newQuantities = { ...prev };
@@ -111,7 +106,7 @@ export default function OrderPage() {
     }
   };
 
-  // Handler: Toggle Modification Selection
+  // FUNCTION: Sets item modification checkbox status to local state
   const handleModificationToggle = (itemIndex, modName, modPrice) => {
     setSelectedModifications(prev => {
         const mods = prev[itemIndex] || [];
@@ -131,7 +126,7 @@ export default function OrderPage() {
     });
   };
 
-  // Handler: Update the 0th element of the restaurantNote array
+  // FUNCTION: Updates the 0th element of the restaurantNote array
   const handleGlobalNoteChange = (e) => {
     const newNote = e.target.value;
     setRestaurantNote(prevNotes => {
@@ -141,6 +136,7 @@ export default function OrderPage() {
     });
   };
 
+  // FUNCTION: Updates the customerTip state directly (used by handleTipPercentageChange)
   const handleTipChange = (value) => {
     const tip = parseFloat(value);
     if (!isNaN(tip) && tip >= 0) {
@@ -150,38 +146,37 @@ export default function OrderPage() {
     }
   };
 
-  // handleSubmitOrder (Updated to include global notes)
+  // FUNCTION: Calculates and sets the customer tip based on selected percentage
+  const handleTipPercentageChange = (percentage) => {
+    const rate = parseFloat(percentage); // This will be 0.0, 0.10, 0.15, etc.
+    setSelectedTipPercentage(rate);
+
+    if (rate > 0) {
+      const calculatedTip = total * rate;
+      handleTipChange(calculatedTip.toFixed(2)); // Use toFixed(2) for precision
+    } else {
+      handleTipChange(0); // "No tip" or 0%
+    }
+  };
+
+  // FUNCTION: Submit button order validation, payment division, and order creation
   const handleSubmitOrder = async () => {
+    //1. Submission validation
     if (isSubmitting) {
       console.log("Order submission already in progress. Ignoring duplicate click.");
       return;
     }
     setIsSubmitting(true);
-    
     if (!isRestaurantOpenToday(restaurant.hours, new Date())) {
       alert("Store is currently closed. Please try during open hours.");
       setIsSubmitting(false);
       return;
     }
-
     if (!isRestaurantAcceptingOrders(restaurant.autoSetting)) {
       alert("Store is currently not accepting orders.");
       setIsSubmitting(false);
       return;
     }
-
-    if (total === 0) {
-      alert("Please add at least one item to your order.");
-      setIsSubmitting(false);
-      return;
-    }
-    //Payment portions of platform, restaurant, and courier
-    const commissionAmount = total * PLATFORM_COMMISSION_RATE;
-    const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
-    const paymentRestaurant = total - commissionAmount;
-    const paymentCourier  = COURIER_BASE_PAY + customerTip;
-    const paymentPlatform = commissionAmount - COURIER_BASE_PAY;
-
     if (!userData?.deliveryLocation) {
       alert("Missing user location.");
       setIsSubmitting(false);
@@ -193,9 +188,21 @@ export default function OrderPage() {
       setIsSubmitting(false);
       return;
     }
+    if (total === 0) {
+      alert("Please add at least one item to your order.");
+      setIsSubmitting(false);
+      return;
+    }
 
+    //2. Payment division to platform, restaurant, and courier 
+    const commissionAmount = total * PLATFORM_COMMISSION_RATE;
+    const COURIER_BASE_PAY = commissionAmount * COURIER_SHARE_OF_COMMISSION;
+    const paymentRestaurant = total - commissionAmount;
+    const paymentCourier  = COURIER_BASE_PAY + customerTip;
+    const paymentPlatform = commissionAmount - COURIER_BASE_PAY;
+
+    //3. Create the order
     try {
-      // Step 1 & 2: Get restaurant doc and Generate unique orderId
       const restaurantRef = doc(db, "restaurants", restaurantId);
       const restaurantSnap = await getDoc(restaurantRef);
 
@@ -209,45 +216,44 @@ export default function OrderPage() {
       const currentTotalOrders = restaurantData.totalOrders || 0;
       const orderId = `${restaurantId}_${currentTotalOrders}`;
 
-      // Step 3: Prepare order items (Removed item-specific requirements)
+      // 3A: Set newOrder.items into Firestore database format: array/map
       const items = Object.entries(quantities)
-        .filter(([idx, qty]) => qty > 0 && restaurant.menu[idx])
-        .map(([idx, qty]) => {
-            const itemIndex = parseInt(idx, 10);
-            return {
-                name: restaurant.menu[itemIndex].name,
-                quantity: qty,
-                prepTime: restaurant.menu[itemIndex].prepTime || 0,
-                selectedMods: selectedModifications[itemIndex] || [], 
-            }
+        .filter(([index, qty]) => qty > 0 && restaurant.menu[index])
+        .map(([index, qty]) => {
+          const itemIndex = parseInt(index, 10);
+          return {
+              name: restaurant.menu[itemIndex].name,
+              quantity: qty,
+              prepTime: restaurant.menu[itemIndex].prepTime || 0,
+              selectedMods: selectedModifications[itemIndex] || [], 
+          }
         });
 
-      // Setting time based variables
+      // 3B: Calculate the newOrder.totalPrepTime value
       const totalPrepTime = items.reduce(
         (sum, item) => sum + (item.prepTime || 0) * item.quantity,
         0
       );
     
+      // 3C: Set order.orderTimeout value for accept/rejection
       const createdAt = Timestamp.now();
       const orderTimeout = Timestamp.fromMillis(createdAt.toMillis() + 60000);
 
-      // Step 4: Construct the order document 
-      // Removed fields: courierArray: [], courierRejectArray: [], estimatedDeliveryTime: null, estimatedPickUpTime: null,
+      // 3D: Set the newOrder fields with appropriate values
+      // Removed fields: courierArray: [], courierRejectArray: [], estimatedDeliveryTime: null, estimatedPickUpTime: null, confirmedTime: null, deliveryConfirmed: false,
       const newOrder = {
         createdAt: createdAt,
-        //confirmedTime: null, //
         courierConfirmed: false,
         courierPickedUp: false,
         courierId: "",
         estimatedPreppedTime: null,
         deliveryStatus: "Awaiting restaurant confirmation.",
-        //deliveryConfirmed: false,
         items,
         orderCompleted: false,
         orderConfirmed: null, // need this null
         orderId,
         orderTimeout: orderTimeout,
-        payment: total,
+        payment: total + customerTip,
         paymentCourier: paymentCourier ,
         paymentPlatform: paymentPlatform,
         paymentRestaurant: paymentRestaurant,
@@ -262,7 +268,7 @@ export default function OrderPage() {
         userLocation: coordinateFormat(userData.deliveryLocation),
       };
 
-      // Step 5 & 6: Save to Firestore and Increment totalOrders
+      // 3E: Create a newOrder document in Firestore database collection restaurants/{restaurantId}/restaurantOrders
       const orderRef = doc(db, "restaurants", restaurantId, "restaurantOrders", orderId);
       await setDoc(orderRef, newOrder);
 
@@ -270,10 +276,10 @@ export default function OrderPage() {
         totalOrders: increment(1),
       });
 
-      // Step 7: Navigate after successful order
+      // 3F: Redirect to UserPage after to order
       navigate("/user", {
         state: {
-          total,
+          total: total + customerTip,
           restaurantName: restaurant.storeName,
           items,
         },
@@ -286,7 +292,7 @@ export default function OrderPage() {
     }
   };
 
-  // LOADING SCREEN CHECKS
+  // ERROR PREVENTION (PAGE)
   if (!authChecked) {
       return <div className="p-6 text-center text-xl">Checking authentication...</div>;
   }
@@ -317,8 +323,7 @@ export default function OrderPage() {
       );
   }
 
-  // --- Main Render ---
-
+  // USER INTERFACE
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">
@@ -407,29 +412,59 @@ export default function OrderPage() {
                     className="w-full border px-3 py-2 rounded text-sm resize-none"
                     placeholder="If filled, order acceptance at restaurant discretion."
                     value={restaurantNote[0] || ""}
-                    onChange={handleGlobalNoteChange}                />
+                    onChange={handleGlobalNoteChange}          
+                />
             </div>
           </div>
-          {/* PAYMENT SECTION */}
+          
+          {/* PAYMENT SECTION WITH TIP DROPDOWN */}
+          <div className="mt-6 p-4 border rounded-md bg-white shadow-md">
+            <h3 className="text-lg font-semibold mb-3">Payment Summary</h3>
+            <div className="space-y-1">
+                <div className="flex justify-between">
+                    <span className="text-gray-700">Subtotal:</span>
+                    <span className="font-medium">${total.toFixed(2)}</span>
+                </div>
 
-          <div className="mt-6 text-right">
-            <p className="text-lg font-bold mb-2">Total: ${total.toFixed(2)}</p>
-            <button
-              type="submit"
-              className="bg-green-600 text-white px-4 py-2 rounded"
-            >
-              Pay & Submit
-            </button>
+                <div className="flex justify-between items-center py-2 border-t border-b">
+                    <label htmlFor="tip-select" className="text-gray-700">Add Tip:</label>
+                    <select
+                        id="tip-select"
+                        className="border px-2 py-1 rounded text-sm"
+                        value={selectedTipPercentage}
+                        onChange={(e) => handleTipPercentageChange(e.target.value)}
+                    >
+                        <option value={0}>No Tip (Default)</option>
+                        <option value={0.10}>10% Tip</option>
+                        <option value={0.15}>15% Tip</option>
+                        <option value={0.20}>20% Tip</option>
+                        <option value={0.25}>25% Tip</option>
+                    </select>
+                </div>
+
+                <div className="flex justify-between">
+                    <span className="text-gray-700">Courier Tip:</span>
+                    <span className="font-medium">${customerTip.toFixed(2)}</span>
+                </div>
+                
+                <div className="flex justify-between pt-2">
+                    <p className="text-xl font-bold">Grand Total:</p>
+                    <p className="text-xl font-bold text-green-700">${(total + customerTip).toFixed(2)}</p>
+                </div>
+            </div>
+            
+            <div className="mt-4 text-right">
+              <button
+                type="submit"
+                className={`w-full bg-green-600 text-white px-4 py-3 rounded-md text-lg font-semibold transition-colors ${isSubmitting || total === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-700'}`}
+                disabled={isSubmitting || total === 0}
+              >
+                {isSubmitting ? "Submitting..." : `Pay & Submit $${(total + customerTip).toFixed(2)}`}
+              </button>
+            </div>
           </div>
         </form>
       )}
     </div>
   );
 }
-
-/*
-* Later: add payment -> create order -> split between: 
-         ~ Restaurant:	        Food revenue (minus platform commission)
-         ~ Delivery Driver:	    Delivery fee + tip (via platform)
-         ~ Platform (Delivery):	Commission + service fees
-*/

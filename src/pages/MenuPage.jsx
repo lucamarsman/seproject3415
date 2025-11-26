@@ -6,8 +6,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase"; 
 import MenuItemCard from "../components/MenuItemCard.jsx";
-import "./MenuPage.css";
 
+// RESTAURANT MENU PAGE - for non-logged in users
 export default function MenuPage() {
     const { id: restaurantId } = useParams();
     const navigate = useNavigate();
@@ -15,11 +15,8 @@ export default function MenuPage() {
     const [restaurantData, setRestaurantData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [cart, setCart] = useState([]);
-    const addToCart = useCallback((item) => { // no cart remove?
-        setCart((prev) => [...prev, item]);
-    }, []);
 
+    // useEffect: Fetch all menu items from the selected restaurantId from Firestore database
     useEffect(() => {
         if (!restaurantId) {
             setLoading(false);
@@ -30,7 +27,6 @@ export default function MenuPage() {
         const fetchMenuAndDetails = async () => {
             setLoading(true);
             setError(null);
-
             try {
                 const restaurantDocRef = doc(db, "restaurants", restaurantId);
                 const restaurantSnapshot = await getDoc(restaurantDocRef); 
@@ -63,41 +59,44 @@ export default function MenuPage() {
         fetchMenuAndDetails();
     }, [restaurantId]);
 
+    // VARIABLE: Filters menuItems by attribute "available"
     const availableMenuItems = useMemo(() => {
         return menuItems.filter(item => item.available !== false); 
     }, [menuItems]);
-
-
-    if (loading) {
-        return <div className="menu-page">Loading menu...</div>;
-    }
-
-    if (error) {
-        return <div className="menu-page error-message">Error: {error}</div>;
-    }
-
     const restaurantName = restaurantData?.storeName || "Restaurant";
-    
+
+    // ERROR PREVENTION (PAGE)
+    if (loading) {
+        return <div className="p-8 font-sans"></div>;
+    }
+    if (error) {
+        return <div className="p-8 text-red-600 font-medium">Error: {error}</div>;
+    }
+
+    // USER INTERFACE   
     return (
-        <div className="menu-page">
-            <button className="back-btn" onClick={() => navigate(-1)}>
-                ← Back
-            </button>
-
-            <h2>🍽️ Menu for {restaurantName}</h2>
-
-            <div className="menu-list">
-                {availableMenuItems.length > 0 ? (
-                    availableMenuItems.map((item) => (
-                        <MenuItemCard
-                            key={item.id} 
-                            item={item}
-                            onAddToCart={addToCart}
-                        />
-                    ))
-                ) : (
-                    <p>No available menu items for this restaurant.</p>
-                )}
+        <div className="p-8 font-sans bg-gray-50 min-h-screen">
+            <div className="max-w-3xl mx-auto"> 
+                <button 
+                    className="mt-3 self-start bg-orange-500 text-white font-medium py-2 px-4 rounded-lg 
+                             shadow-md hover:bg-orange-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50"
+                    onClick={() => navigate(-1)}
+                >
+                    ← Back
+                </button>
+                <h2 className="text-3xl font-semibold text-gray-900 mb-6 text-center">🍽️ Menu for {restaurantName}</h2>                
+                <div className="flex flex-col gap-5 mt-5">
+                    {availableMenuItems.length > 0 ? (
+                        availableMenuItems.map((item) => (
+                            <MenuItemCard
+                                key={item.id} 
+                                item={item}
+                            />
+                        ))
+                    ) : (
+                        <p className="text-gray-500 italic">No available menu items for this restaurant.</p>
+                    )}
+                </div>
             </div>
         </div>
     );

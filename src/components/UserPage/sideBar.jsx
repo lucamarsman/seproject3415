@@ -7,28 +7,56 @@ import messagesIcon from "../../assets/messages.svg";
 import settingsIcon from "../../assets/settings.svg";
 import ordersIcon from "../../assets/orders.svg";
 
-// Removed static cuisineBtns array; gets icons and labels from the database: systemFiles/systemVariables/iconTypes
+function NavButton({
+  active,
+  onClick,
+  iconSrc,
+  children,
+  ariaLabel,
+  newOrderCount = 0,
+}) {
+  const showBadge = newOrderCount > 0;
+  const badgeSizeClasses = newOrderCount < 10 ? "w-5" : "px-2";
 
-function NavButton({ active, onClick, iconSrc, children, ariaLabel }) {
   return (
     <button
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       aria-label={ariaLabel}
-      className={`flex items-center gap-2 text-left px-3 py-2 rounded-md cursor-pointer transition-all
-            ${
-              active
-                ? "bg-gray-200 text-gray-800"
-                : "hover:bg-gray-100 text-gray-800"
-            }`}
+      className={`flex items-center justify-between text-left px-3 py-2 rounded-md cursor-pointer transition-all
+        ${
+          active
+            ? "bg-gray-200 text-gray-800"
+            : "hover:bg-gray-100 text-gray-800"
+        }`}
     >
-      <img
-        src={iconSrc}
-        className="w-5 h-5 object-contain"
-        alt=""
-        aria-hidden="true"
-      />
-      {children}
+      <div className="flex items-center gap-2">
+        <img
+          src={iconSrc}
+          className="w-5 h-5 object-contain"
+          alt=""
+          aria-hidden="true"
+        />
+        {children}
+      </div>
+
+      {showBadge && (
+        <span
+          className={`
+                        // Badge styles
+                        bg-red-600 text-white text-xs font-bold rounded-full 
+                        
+                        // Sizing and centering
+                        h-5 flex items-center justify-center 
+                        ${badgeSizeClasses} 
+                        text-center
+                        flex-shrink-0 // Crucial: Prevents the badge from shrinking when space is tight
+                    `}
+          aria-label={`${newOrderCount} deliveries to confirm`}
+        >
+          {newOrderCount > 99 ? "99+" : newOrderCount}
+        </span>
+      )}
     </button>
   );
 }
@@ -39,8 +67,9 @@ export default function Sidebar({
   filters,
   toggleType,
   clearTypes,
+  isSidebarOpen,
+  pendingDeliveryCount,
 }) {
-  // variable for cuisine buttons
   const [cuisineBtns, setCuisineBtns] = useState([]);
   const [loadingCuisines, setLoadingCuisines] = useState(true);
 
@@ -74,10 +103,26 @@ export default function Sidebar({
     fetchCuisineIcons();
   }, []);
 
+  const handleFilterClick = (type) => {
+    toggleType(type);
+    setActiveTab("home");
+  };
+
   return (
     <aside
-      className="w-64 bg-white border-r border-gray-300 p-4 sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-scroll"
       aria-label="User navigation and filters"
+      className={`
+        bg-white border-r border-gray-300 p-4
+        max-h-[calc(100vh-4rem)] overflow-y-scroll z-40
+
+        /* MOBILE */
+        fixed top-16 left-0 h-[calc(100vh-4rem)] w-64
+        transform transition-transform duration-200 ease-in-out
+        ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}
+
+        /* DESKTOP */
+        md:sticky md:top-16 md:h-auto md:w-64 md:translate-x-0 md:block
+      `}
     >
       <div className="flex flex-col space-y-2">
         <NavButton
@@ -86,8 +131,7 @@ export default function Sidebar({
           iconSrc={homeIcon}
           ariaLabel="Go to Home tab"
         >
-          {" "}
-          Home{" "}
+          Home
         </NavButton>
         <NavButton
           active={activeTab === "messages"}
@@ -95,17 +139,16 @@ export default function Sidebar({
           iconSrc={messagesIcon}
           ariaLabel="Go to Messages tab"
         >
-          {" "}
-          Messages{" "}
+          Messages
         </NavButton>
         <NavButton
           active={activeTab === "orders"}
           onClick={() => setActiveTab("orders")}
           iconSrc={ordersIcon}
           ariaLabel="Go to Orders tab"
+          newOrderCount={pendingDeliveryCount}
         >
-          {" "}
-          My Orders{" "}
+          My Orders
         </NavButton>
         <NavButton
           active={activeTab === "settings"}
@@ -113,11 +156,11 @@ export default function Sidebar({
           iconSrc={settingsIcon}
           ariaLabel="Go to Settings tab"
         >
-          {" "}
-          Settings{" "}
+          Settings
         </NavButton>
 
         <hr className="my-1 border-gray-300" />
+
         <div className="mt-3">
           {loadingCuisines ? (
             <p className="text-sm text-gray-500">Loading filters...</p>
@@ -129,17 +172,14 @@ export default function Sidebar({
                   <button
                     key={type}
                     type="button"
-                    onClick={() => {
-                      toggleType(type);
-                      setActiveTab("home");
-                    }}
+                    onClick={() => handleFilterClick(type)}
                     aria-pressed={active}
                     className={`flex items-center justify-start w-[200px] px-2 py-0 rounded-lg border font-medium text-base transition-all cursor-pointer
-                                          ${
-                                            active
-                                              ? "bg-blue-600 text-white border-blue-600 shadow-md"
-                                              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50 hover:shadow"
-                                          }`}
+                      ${
+                        active
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md"
+                          : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50 hover:shadow"
+                      }`}
                   >
                     <span className="inline-flex items-center justify-center w-8 h-8 mr-3 text-2xl">
                       {icon}

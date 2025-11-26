@@ -13,9 +13,6 @@ export default function Footer() {
           <Link to="/" className="footer-brand" aria-label="Go to Home">
             <Logo width={120} />
           </Link>
-          <p className="footer-blurb">
-            Grab N Go — a simple local food delivery demo app for coursework.
-          </p>
         </div>
 
         {/* Column 2: Product links */}
@@ -23,8 +20,8 @@ export default function Footer() {
           <div className="footer-title">Product</div>
           <ul className="footer-links">
             <li><Link to="/">Home</Link></li>
-            <li><Link to="/restaurants">Restaurants</Link></li>
-            <li><Link to="/orders">My Orders</Link></li>
+            <li><Link to="/browseRestaurants">Restaurants</Link></li>
+            <li><Link to="/user">My Orders</Link></li>
           </ul>
         </nav>
 
@@ -33,8 +30,8 @@ export default function Footer() {
           <div className="footer-title">For Restaurants</div>
           <ul className="footer-links">
             <li><Link to="/restaurant">Dashboard</Link></li>
-            <li><Link to="/restaurant/menu">Menu Manager</Link></li>
-            <li><Link to="/restaurant/orders">Orders</Link></li>
+            <li><Link to="/browseRestaurants">Menu Manager</Link></li>
+            <li><Link to="/restaurant">Orders</Link></li>
           </ul>
         </nav>
 
@@ -51,9 +48,9 @@ export default function Footer() {
       <div className="footer-bottom">
         <span>© {year} Grab N Go</span>
         <span className="dot">•</span>
-        <Link to="/legal" className="muted">Terms</Link>
+        <Link to="#" className="muted">Terms</Link>
         <span className="dot">•</span>
-        <Link to="/privacy" className="muted">Privacy</Link>
+        <Link to="#" className="muted">Privacy</Link>
       </div>
     </footer>
   );
